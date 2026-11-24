@@ -1,43 +1,52 @@
 # Organic Maps 데스크톱 사용성 개선
 
-Organic Maps 기존 C++/Qt 창에 한국어 장소 검색, 출발·도착 선택, 도보/차량 전환, 거리·예상 시간·이동 단계, 장소 이름·메모 저장 및 GPS 상태 표시를 추가한다. Korea SOS Atlas Kit 본체는 Rust이며 지도는 별도 프로세스로 실행한다. 음성 안내는 포함하지 않는다.
+Organic Maps 데스크톱(C++/Qt) 창에 한국어 화면, 장소 검색 기본 노출, 출발·도착 선택, 도보/차량 전환, 거리·예상 시간·이동 단계, 장소 이름·메모 저장, GPS 상태 표시를 추가한다. Korea SOS Atlas Kit 본체는 Rust이며 지도는 별도 프로세스로 실행한다. 음성 안내는 포함하지 않는다.
 
-Organic Maps 이름·로고·지도 고지를 보존한다. 수정판임을 창 제목과 정보 화면에 표시한다. 원래 지도와 경로 엔진을 변경하지 않는다. MAPS.ME 코드를 복사하지 않았다.
+Organic Maps 이름·로고·지도 고지를 보존하고, 수정판임을 창 제목과 정보 화면에 표시한다. 원래 지도와 경로 엔진은 바꾸지 않는다. MAPS.ME 코드를 복사하지 않았다.
 
 ## 소스와 권리
 
 - upstream: https://github.com/organicmaps/organicmaps
-- 고정 소스: `d81f9197c6759f67aaed60f4f9c819e834dd02cd`
-- 수정 소스: `desktop-usability.patch`; 원래 코드와 이 패치는 Apache-2.0이다. `LICENSE`, `NOTICE`를 함께 보존한다.
-- 앱 자체 AGPL과 지도 데이터 권리는 별개이다. [지도 권리 대장](../../LICENSES/MAPS.md)을 따른다.
-- 원본 `.reuse/dep5`, `data/copyright.html` 및 각 의존성의 LICENSE/NOTICE도 바이너리 배포 시 보존한다.
-- 개발 체크아웃, SDK, 중간 빌드, GUI 캡처는 `dev/poc/maps-ui`에 두며 원격에 올리지 않는다.
+- 원래 코드와 이 디렉토리의 패치는 Apache-2.0이다. `LICENSE`, `NOTICE`를 함께 보존한다.
+- 지도 데이터(`.mwm`)는 코드와 별개인 Organic Maps Binary Data License를 따른다. [지도 권리 대장](../../LICENSES/MAPS.md)을 참고한다.
+- 바이너리를 배포할 때 원본의 `LICENSE`·`NOTICE`·`DATA_LICENSE.txt`·`LICENSES/`, 의존성 고지, 이 패치를 함께 둔다.
 
-## 재현 빌드
+| 플랫폼 | upstream 기준 | 패치 | 빌드 |
+|---|---|---|---|
+| Windows x64 | 릴리스 `2026.11.11-39` (`5c0c5ec0a706b9bea17b4d5b0b40e7b60f916a13`) — upstream Windows 지원이 들어간 첫 릴리스 계열 | `desktop-usability-2026.11.patch` | GitHub Actions `.github/workflows/organicmaps-windows.yml` |
+| Linux x86_64 | `d81f9197c6759f67aaed60f4f9c819e834dd02cd` (2026-05-28) | `desktop-usability.patch` | `build.sh` (KDE SDK 6.10 flatpak) |
 
-KDE SDK 6.10, GCC, CMake, Ninja, Git이 있는 개발 환경에서 실행한다. 최종 사용자는 이 도구들을 설치하지 않는다. 소스·서브모듈 준비에 네트워크가 필요하며 준비 후 컴파일과 실행은 오프라인으로 한다.
+두 패치는 같은 기능이다. Windows용은 Linux용을 새 기준에 맞춰 옮긴 것으로, upstream이 새로 쓰는 번역 키(`Tr("clear_route")` 등)와 새 기능(공유 메뉴, 저장 색상)을 유지하고 이 프로젝트의 동작 변경만 다시 적용했다. upstream 한국어 번역이 비어 있는 화면 문구는 `qt/atlas_ko.json`이 채운다. Linux는 Flathub 런타임의 데이터 파일과 맞춰야 해서 기존 기준을 유지한다.
+
+## Windows 빌드 (GitHub Actions)
+
+`organicmaps-windows.yml`은 upstream의 Windows CI 단계(MSVC, Qt 6.8.3 msvc2022_64 + qtpositioning, `ci-windows` 프리셋)를 그대로 따른다. 그다음 패치를 적용하고 `OMIM_WINDOWS_DISTRIBUTION=direct`로 빌드한 뒤, upstream의 배포 준비 스크립트(`tools/windows/stage_runtime.py`)로 실행 폴더를 만든다.
+
+- upstream 배포 준비는 Visual C++ 런타임을 넣지 않는다. 그래서 워크플로가 `vcruntime140*.dll`·`msvcp140*.dll`을 실행 파일 옆에 함께 둔다. 새로 설치한 Windows 10/11에서도 따로 설치할 것이 없다.
+- 결과 폴더에는 `licenses/korea-sos-atlas-kit/`(이 패치, 수정 고지, 빌드 기록)와 전체 파일의 `SHA256SUMS`가 들어간다. 지도 데이터는 넣지 않는다.
+- 워크플로 결과물(artifact) `organicmaps-windows-x64`를 받아 키트의 `data/runtime/organicmaps-win-x64/`에 둔다. 키트의 `assets.json`이 `SHA256SUMS`의 해시를 고정하고, 앱은 지도를 열기 전에 모든 파일을 대조한다.
+
+## Linux 빌드
+
+KDE SDK 6.10, GCC, CMake, Ninja, Git이 있는 개발 환경에서 실행한다. 최종 사용자는 이 도구들을 설치하지 않는다. 소스와 서브모듈을 받을 때만 네트워크가 필요하고, 컴파일과 실행은 오프라인으로 한다.
 
 ```sh
-# Korea SOS Atlas Kit 프로젝트 루트에서 실행
-git clone --filter=blob:none --no-checkout https://github.com/organicmaps/organicmaps dev/poc/maps-ui/upstream
-git -C dev/poc/maps-ui/upstream checkout d81f9197c6759f67aaed60f4f9c819e834dd02cd
-git -C dev/poc/maps-ui/upstream submodule update --init --recursive --depth 1
+# 작업 폴더(예: build/organicmaps)에서 실행
+git clone --filter=blob:none --no-checkout https://github.com/organicmaps/organicmaps upstream
+git -C upstream checkout d81f9197c6759f67aaed60f4f9c819e834dd02cd
+git -C upstream submodule update --init --recursive --depth 1
 flatpak run --user --unshare=network --filesystem="$PWD" --command=bash org.kde.Sdk//6.10 \
-  "$PWD/integrations/organicmaps/build.sh" "$PWD/dev/poc/maps-ui/upstream" "$PWD/dev/poc/maps-ui/build"
+  <키트 소스>/integrations/organicmaps/build.sh "$PWD/upstream" "$PWD/build"
 ```
 
-이 스크립트는 패치 적용·컴파일·위치 시각 경계 검사를 수행한다. GUI 검증까지 자동 통과한 것으로 취급하지 않는다. 노트북 메모리를 고려해 기본 병렬도는 2이다. `SOS_BUILD_JOBS`로 조정할 수 있다.
+스크립트는 패치 적용, 컴파일, 위치 시각 경계 검사를 한다. GUI 검증까지 자동으로 통과한 것으로 보지 않는다. 기본 병렬도는 2이며 `SOS_BUILD_JOBS`로 바꿀 수 있다. Linux에서는 서명된 Flathub 앱을 고치지 않고, 수정한 실행 파일만 따로 두어 Flathub 앱의 데이터 파일과 KDE 런타임을 쓴다. Linux의 한글 입력기 런타임(Fcitx5)은 개인용 Linux 구성에만 쓰며 이 저장소의 배포 대상이 아니다.
 
 ## 실행 구성
 
-공식 시설은 Rust TUI `대피시설` 분류에서 선택하고 `m`으로 보낸다. 해시 검증된 시설의 EPSG4326 좌표만 전용 상태 파일에 원자적으로 기록하며 지도는 `SOS_ATLAS_REQUEST`로 전달받은 로컬 파일을 읽어 목적지를 설정한다. 기존 지도 창에서도 목적지를 교체할 수 있다. 좌표 없는 시설에는 위치를 추정하지 않는다. 이 연결은 선택한 시설을 표시하는 방식이며 전국 대피시설 전체를 OSM 기본 데이터에 합치지 않는다.
+공식 시설은 TUI의 `대피시설` 분류에서 고르고 `m`으로 지도에 보낸다. 해시 검증된 시설의 좌표만 상태 파일에 원자적으로 기록하고, 지도는 `SOS_ATLAS_REQUEST` 환경 변수로 받은 파일을 읽어 목적지를 설정한다. 좌표가 없는 시설은 위치를 추정하지 않는다. 이 연결은 선택한 시설을 표시하는 방식이며 전국 대피시설을 OSM 지도 데이터에 합치지 않는다.
 
-원래 서명된 Flatpak 앱을 수정하지 않고, 수정 바이너리를 `dev/runtime/maps/overlay/bin/OMaps`에 별도로 둔다. 기존 Organic Maps Flatpak의 리소스와 KDE 런타임을 사용한다. Rust 실행기는 `maps.json`의 지도 파일과 수정 바이너리 SHA-256을 확인한 후 네트워크 차단 상태로 실행한다. 수정 바이너리가 없거나 다르면 기존 화면으로 조용히 대체하지 않고 오류를 표시한다.
-
-개발 SDK는 사용자용 USB에 필요하지 않다. 최종 USB 이미지에는 실행 런타임과 지도·폰트·수정 바이너리 및 각 구성 요소의 고지·대응 소스 제공 방법을 담아야 한다. 이 디렉토리의 소스 패치는 부팅 이미지 자체가 아니다.
+앱은 지도 파일(`maps.json`)과 지도 프로그램의 해시를 확인한 뒤에만 지도를 연다. 맞지 않으면 다른 프로그램으로 조용히 대체하지 않고 오류를 표시한다. Linux는 네트워크를 차단한 샌드박스에서 실행한다. Windows는 운영체제 차원의 네트워크 차단 없이 실행하며, 지도 보기·검색·경로 계산에는 네트워크가 필요하지 않다.
 
 ## 위치 수신 범위
 
-기존 Qt/GeoClue 위치 서비스를 사용한다. 지도 파일이나 노트북 Wi-Fi만으로 오프라인 GPS가 생기는 것은 아니다. 실제 오프라인 현재 위치에는 GNSS 수신기와 운영체제 위치 서비스 연결이 필요하다. 위치가 없거나 15초 이상 오래됐거나 시각이 미래로 잘못 들어오면 현재 위치 기반 안내를 시작하지 않는다. 출발점을 수동 선택하는 경로 계산은 계속 사용할 수 있다.
-
-현재 개발 환경에는 GNSS 수신기가 없어 실제 위성 수신·이동·재탐색은 검증 대상 하드웨어가 필요하다. 시계 경계 검사나 수동 경로 계산을 실제 GPS 검증으로 표시하지 않는다.
+운영체제 위치 서비스(Qt Positioning)를 사용한다. 지도 파일만으로 오프라인 GPS가 생기지는 않으며, 실제 현재 위치에는 GNSS 수신기와 운영체제 위치 서비스가 필요하다. 위치가 없거나 15초 이상 오래됐거나 시각이 미래로 잘못 들어오면 현재 위치 기반 안내를 시작하지 않는다. 출발점을 직접 고르는 경로 계산은 계속 쓸 수 있다. 실제 위성 수신·이동·재탐색은 수신기가 없어 검증하지 못했다.

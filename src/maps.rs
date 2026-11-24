@@ -27,11 +27,7 @@ pub(super) fn destination(root: &Path, location: Option<&shelters::Location>) ->
         return "Invalid destination coordinates".into();
     }
     let result = (|| -> Result<(), Box<dyn std::error::Error>> {
-        let root = root.canonicalize()?;
-        let state = root
-            .parent()
-            .ok_or("Missing runtime parent")?
-            .join("runtime/maps/state");
+        let state = state_dir(&root.canonicalize()?)?;
         fs::create_dir_all(&state)?;
         fs::write(state.join("destination.tmp"), serde_json::to_vec(location)?)?;
         fs::rename(
@@ -50,12 +46,24 @@ pub(super) fn destination(root: &Path, location: Option<&shelters::Location>) ->
     }
 }
 
-const NOT_THIS_OS: &str = "지도 보기는 아직 Linux에서만 됩니다. Windows·macOS용 지도는 준비 중이며, 대피시설 목록과 주소 검색은 그대로 쓸 수 있습니다.";
+const NOT_THIS_OS: &str = "이 운영체제에서는 아직 지도 보기가 되지 않습니다. 대피시설 목록과 주소 검색은 그대로 쓸 수 있습니다.";
 
-fn command(root: &Path) -> Result<(Command, PathBuf), Box<dyn std::error::Error>> {
-    if !cfg!(target_os = "linux") {
-        return Err(NOT_THIS_OS.into());
-    }
+/// Per-OS viewer folder under the data folder's `runtime/`.
+const WINDOWS_VIEWER: &str = "runtime/organicmaps-win-x64";
+
+fn state_dir(root: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let data = root.parent().ok_or("Missing runtime parent")?;
+    Ok(if cfg!(windows) {
+        data.join(WINDOWS_VIEWER).join("state")
+    } else {
+        data.join("runtime/maps/state")
+    })
+}
+
+type Error = Box<dyn std::error::Error>;
+
+/// The approved, hash-checked Korean map files: (content root, map directory).
+fn verified_maps(root: &Path) -> Result<(PathBuf, PathBuf), Error> {
     let root = root.canonicalize()?;
     let manifest: Value = serde_json::from_slice(&fs::read(root.join("maps.json"))?)?;
     if manifest["approved"] != true {
@@ -79,6 +87,18 @@ fn command(root: &Path) -> Result<(Command, PathBuf), Box<dyn std::error::Error>
             return Err("Map file integrity check failed".into());
         }
     }
+    Ok((root, dir))
+}
+
+fn command(root: &Path) -> Result<(Command, PathBuf), Error> {
+    let (root, dir) = verified_maps(root)?;
+    if cfg!(windows) {
+        return windows_command(&root, &dir);
+    }
+    if !cfg!(target_os = "linux") {
+        return Err(NOT_THIS_OS.into());
+    }
+    let manifest: Value = serde_json::from_slice(&fs::read(root.join("maps.json"))?)?;
     let runtime = root
         .parent()
         .ok_or("Missing runtime parent")?
@@ -193,6 +213,73 @@ fn command(root: &Path) -> Result<(Command, PathBuf), Box<dyn std::error::Error>
     Ok((cmd, log))
 }
 
+/// Windows: the Organic Maps viewer built by .github/workflows/organicmaps-windows.yml.
+/// assets.json pins the hash of its SHA256SUMS, which lists every file.
+fn windows_command(root: &Path, dir: &Path) -> Result<(Command, PathBuf), Error> {
+    use std::sync::OnceLock;
+    static VERIFIED: OnceLock<PathBuf> = OnceLock::new();
+    let data = root.parent().ok_or("Missing runtime parent")?;
+    let viewer_dir = data.join(WINDOWS_VIEWER);
+    let exe = viewer_dir.join("OrganicMaps.exe");
+    if !exe.is_file() {
+        return Err(format!(
+            "지도 프로그램이 없습니다({}). 지도 없이 자료와 대피시설 목록은 쓸 수 있습니다.",
+            WINDOWS_VIEWER
+        )
+        .into());
+    }
+    if VERIFIED.get() != Some(&viewer_dir) {
+        let assets: Value = serde_json::from_slice(&fs::read(data.join("assets.json"))?)?;
+        let pinned = assets["maps_viewer"]["windows-x86_64"]["sums_sha256"]
+            .as_str()
+            .ok_or("assets.json has no Windows map viewer entry")?;
+        let sums = viewer_dir.join("SHA256SUMS");
+        if file_hash(&sums)? != pinned {
+            return Err("Map viewer integrity check failed (SHA256SUMS)".into());
+        }
+        for line in fs::read_to_string(&sums)?.lines() {
+            // "<hash>  <file>" (text) or "<hash> *<file>" (binary mode).
+            let (hash, rest) = line.split_once(' ').ok_or("Malformed SHA256SUMS")?;
+            let name = rest
+                .strip_prefix(['*', ' '])
+                .ok_or("Malformed SHA256SUMS")?;
+            let path = viewer_dir.join(name.trim_start_matches("./"));
+            if !path.starts_with(&viewer_dir) || file_hash(&path)? != hash {
+                return Err(format!("Map viewer integrity check failed: {name}").into());
+            }
+        }
+        let _ = VERIFIED.set(viewer_dir.clone());
+    }
+    let state = state_dir(root)?;
+    fs::create_dir_all(&state)?;
+    let log = state.join("viewer.log");
+    let output = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log)?;
+    let plain = |p: PathBuf| crate::layout::plain(p).display().to_string();
+    let mut cmd = Command::new(crate::layout::plain(exe));
+    cmd.arg(format!(
+        "--resources_path={}",
+        plain(viewer_dir.join("data"))
+    ))
+    .arg(format!("--data_path={}", plain(dir.join("maps"))))
+    .arg("--lang=ko")
+    .env(
+        "SOS_ATLAS_REQUEST",
+        crate::layout::plain(state.join("destination.json")),
+    )
+    // Settings stay in the portable folder (patch: libs/platform/platform_win.cpp).
+    .env(
+        "SOS_ATLAS_SETTINGS_DIR",
+        crate::layout::plain(state.join("settings")),
+    )
+    .stdin(Stdio::null())
+    .stdout(output.try_clone()?)
+    .stderr(output);
+    Ok((cmd, log))
+}
+
 pub(super) fn launch(root: &Path) -> String {
     if RUNNING.swap(true, Ordering::SeqCst) {
         return "Organic Maps is already open".into();
@@ -287,7 +374,36 @@ mod tests {
         assert_eq!(hit(*x + 1, 1, 120, 30, &App::default(), 0), Some((0, 3)));
     }
     #[test]
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(windows)]
+    fn windows_viewer_is_hash_checked_and_portable() {
+        // Uses the dev layout, which has the package's shape: content-library,
+        // runtime/organicmaps-win-x64 and assets.json side by side.
+        let root = crate::project_root().join("dev/content-library");
+        let (cmd, _) = command(&root).unwrap();
+        let args: Vec<_> = cmd
+            .get_args()
+            .map(|x| x.to_string_lossy().into_owned())
+            .collect();
+        assert!(cmd
+            .get_program()
+            .to_string_lossy()
+            .ends_with("OrganicMaps.exe"));
+        assert!(args
+            .iter()
+            .any(|a| a.starts_with("--resources_path=") && a.ends_with("data")));
+        assert!(args
+            .iter()
+            .any(|a| a.starts_with("--data_path=") && a.ends_with("maps")));
+        assert!(args.contains(&"--lang=ko".to_owned()));
+        let envs: Vec<_> = cmd
+            .get_envs()
+            .map(|(k, _)| k.to_string_lossy().into_owned())
+            .collect();
+        assert!(envs.contains(&"SOS_ATLAS_REQUEST".to_owned()));
+        assert!(envs.contains(&"SOS_ATLAS_SETTINGS_DIR".to_owned()));
+    }
+    #[test]
+    #[cfg(not(any(target_os = "linux", windows)))]
     fn other_os_gets_a_clear_notice_instead_of_a_viewer() {
         let root = crate::project_root().join("dev/content-library");
         assert_eq!(command(&root).err().unwrap().to_string(), NOT_THIS_OS);
