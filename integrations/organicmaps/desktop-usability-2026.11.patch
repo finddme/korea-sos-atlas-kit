@@ -1,3 +1,32 @@
+diff --git a/libs/platform/platform_win.cpp b/libs/platform/platform_win.cpp
+index 1ce5c486d9..7f6728f9de 100644
+--- a/libs/platform/platform_win.cpp
++++ b/libs/platform/platform_win.cpp
+@@ -12,6 +12,7 @@
+ 
+ #include <functional>
+ 
++#include <cstdlib>
+ #include <direct.h>
+ #include <shlobj.h>
+ #include <shlwapi.h>
+@@ -22,6 +23,16 @@ namespace
+ {
+ bool GetUserWritableDir(std::string & outDir)
+ {
++  // Korea SOS Atlas Kit modification (2026-11-24): a portable kit keeps the
++  // viewer's settings next to it instead of in the user profile.
++  if (char const * dir = std::getenv("SOS_ATLAS_SETTINGS_DIR"); dir != nullptr && *dir != '\0')
++  {
++    outDir = dir;
++    if (outDir.back() != '\\' && outDir.back() != '/')
++      outDir += '\\';
++    return Platform::MkDirRecursively(outDir);
++  }
++
+   char pathBuf[MAX_PATH] = {};
+   if (FAILED(::SHGetFolderPathA(nullptr, CSIDL_LOCAL_APPDATA, nullptr, SHGFP_TYPE_CURRENT, pathBuf)))
+     return false;
 diff --git a/qt/CMakeLists.txt b/qt/CMakeLists.txt
 index ae3cedbfc0..946b4f8a35 100644
 --- a/qt/CMakeLists.txt
