@@ -206,6 +206,7 @@ fn single_cell(c: char, wide: &HashSet<char>) -> char {
         '★' => &['*'],
         '…' => &['.'],
         '°' => &['o'],
+        '※' => &['*'],
         _ => &['?'],
     };
     options

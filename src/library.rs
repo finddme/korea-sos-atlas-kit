@@ -129,13 +129,55 @@ pub(super) fn load_approved(root: &Path) -> Result<(Vec<Doc>, PathBuf), Error> {
     Ok((docs, root.to_path_buf()))
 }
 
-// Explicit local validation opt-in. This never adds a source to approved.json or
-// grants redistribution rights. Every exposed section is bound to reviewed text.
-pub(super) fn load_local_manuals(root: &Path) -> Result<Vec<Doc>, Error> {
-    let manifest: Value = serde_json::from_slice(&fs::read(root.join("local-manuals.json"))?)?;
-    if manifest["release_status"] != "local_validation_only" {
-        return Err("Local manuals require an explicit local-only release status".into());
+/// Whether a manual entry in local-manuals.json is approved for public
+/// redistribution: `release: "public_approved"` plus translate/edit/
+/// redistribute rights and hash-bound rights evidence. Anything else is a
+/// local (personal) manual.
+pub(super) fn manual_is_public(root: &Path, m: &Value) -> Result<bool, Error> {
+    if m["release"] != "public_approved" {
+        return Ok(false);
     }
+    for flag in ["redistribute", "translate", "edit"] {
+        if m["rights"][flag] != true {
+            return Err(format!("Manual rights not approved: {flag}").into());
+        }
+    }
+    let evidence = m["rights"]["policy_evidence"]
+        .as_array()
+        .filter(|e| !e.is_empty())
+        .ok_or("Manual rights evidence missing")?;
+    for p in evidence {
+        checked(
+            root,
+            p["file"].as_str().ok_or("Missing policy path")?,
+            &p["sha256"],
+        )?;
+    }
+    Ok(true)
+}
+
+// Manuals: each entry is either local (personal validation, never public) or
+// public_approved with rights evidence (see manual_is_public). Every exposed
+// section is bound to reviewed text.
+pub(super) fn load_local_manuals(root: &Path) -> Result<Vec<Doc>, Error> {
+    load_manuals(root, Some(false))
+}
+/// Public-approved manuals belong with the approved library; a missing
+/// manifest simply means there are none.
+pub(super) fn load_public_manuals(root: &Path) -> Result<Vec<Doc>, Error> {
+    if !root.join("local-manuals.json").exists() {
+        return Ok(Vec::new());
+    }
+    load_manuals(root, Some(true))
+}
+/// `only_public`: Some(true) public manuals, Some(false) local ones, None all.
+pub(super) fn load_manuals(root: &Path, only_public: Option<bool>) -> Result<Vec<Doc>, Error> {
+    let manifest: Value = serde_json::from_slice(&fs::read(root.join("local-manuals.json"))?)?;
+    let per_manual = match manifest["release_status"].as_str() {
+        Some("local_validation_only") => false,
+        Some("per_manual") => true,
+        _ => return Err("Manuals require an explicit release status".into()),
+    };
     let mut docs = Vec::new();
     let mut ids = HashSet::new();
     for m in manifest["manuals"].as_array().ok_or("Missing manuals")? {
@@ -153,6 +195,20 @@ pub(super) fn load_local_manuals(root: &Path) -> Result<Vec<Doc>, Error> {
         let page_count = m["pages"].as_u64().ok_or("Missing page count")?;
         let manual_id = m["id"].as_str().ok_or("Missing manual ID")?;
         let label = m["title"].as_str().ok_or("Missing manual title")?;
+        let public = per_manual && manual_is_public(root, m)?;
+        if only_public.is_some_and(|want| want != public) {
+            continue;
+        }
+        let (record_head, source_tail) = if public {
+            (
+                m["rights"]["label"]
+                    .as_str()
+                    .ok_or("Missing manual rights label")?,
+                "",
+            )
+        } else {
+            ("개인 검증용 · 공개 배포 승인과 별개", " · 개인 검증용")
+        };
         for s in m["sections"]
             .as_array()
             .ok_or("Missing reviewed sections")?
@@ -190,8 +246,8 @@ pub(super) fn load_local_manuals(root: &Path) -> Result<Vec<Doc>, Error> {
                 file: format!("{dir_name}/ko.md"),
                 body: body.into(),
                 display_body: manual_display(body),
-                record: format!("개인 검증용 · 공개 배포 승인과 별개\n{}", record.trim()),
-                source: format!("{label} / PDF {page}쪽 · 개인 검증용"),
+                record: format!("{record_head}\n{}", record.trim()),
+                source: format!("{label} / PDF {page}쪽{source_tail}"),
                 original_uri: format!(
                     "file://{}#page={page}",
                     utf8_percent_encode(&original_path.to_string_lossy(), URI_ESC)
@@ -200,9 +256,6 @@ pub(super) fn load_local_manuals(root: &Path) -> Result<Vec<Doc>, Error> {
                 original_path: original_path.clone(),
             });
         }
-    }
-    if docs.is_empty() {
-        return Err("Empty local manual catalog".into());
     }
     Ok(docs)
 }
@@ -353,7 +406,7 @@ mod tests {
     fn full_local_manual_corpus_search_render_and_source_links() {
         use ratatui::backend::TestBackend;
         let root = crate::project_root().join("dev/content-library");
-        let docs = load_local_manuals(&root).unwrap();
+        let docs = load_manuals(&root, None).unwrap();
         let manifest: Value =
             serde_json::from_slice(&fs::read(root.join("local-manuals.json")).unwrap()).unwrap();
         let expected: usize = manifest["manuals"]
@@ -422,9 +475,10 @@ mod tests {
         assert!(default_includes_manuals(&root).unwrap());
         let profile: Value =
             serde_json::from_slice(&fs::read(root.join("default-local.json")).unwrap()).unwrap();
+        let local_manual_sections = load_local_manuals(&root).unwrap().len();
         assert_eq!(
             docs.len(),
-            299 + profile["documents"].as_array().unwrap().len()
+            local_manual_sections + profile["documents"].as_array().unwrap().len()
         );
         for entry in profile["documents"].as_array().unwrap() {
             let dir = root.join(entry.as_str().unwrap());

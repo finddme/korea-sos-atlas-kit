@@ -54,10 +54,7 @@ impl Controller {
         let unavailable = crate::layout::ai_unavailable_reason(&root);
         let status = match &unavailable {
             Some(reason) => Update::new("UNAVAILABLE", reason.clone()),
-            None => Update::new(
-                "OFF",
-                "Click AI ON to load the local model. No model is running.",
-            ),
+            None => Update::new("OFF", crate::AI_OFF_TEXT),
         };
         Self {
             worker: None,
@@ -93,7 +90,10 @@ impl Controller {
         let (utx, urx) = mpsc::channel();
         self.commands = Some(tx);
         self.updates = Some(urx);
-        self.status = Update::new("STARTING", "Loading local model… Click AI OFF to cancel.");
+        self.status = Update::new(
+            "STARTING",
+            "로컬 모델을 불러오는 중입니다… [p]를 누르면 취소합니다.",
+        );
         let root = self.root.clone();
         let corpus = self.corpus.clone();
         self.worker = Some(thread::spawn(move || {
@@ -122,7 +122,7 @@ impl Controller {
         if self.status.phase == "READY" && !q.trim().is_empty() {
             if let Some(tx) = &self.commands {
                 if tx.send(q).is_ok() {
-                    self.status = Update::new("SEARCHING", "Generating search terms…");
+                    self.status = Update::new("SEARCHING", "질문에서 검색어를 만드는 중입니다…");
                 }
             }
         }
@@ -163,7 +163,7 @@ impl Controller {
                     u.phase = "OFF".into();
                     u.text = format!("AI OFF · 모델 종료 완료. 아래 답변과 근거는 계속 읽을 수 있습니다.\n\n{}", u.text);
                     u
-                }).unwrap_or_else(|| Update::new("OFF", "Model stopped. Process and request resources released."));
+                }).unwrap_or_else(|| Update::new("OFF", "AI를 껐습니다. 모델이 쓰던 메모리를 돌려놓았습니다."));
             }
             changed = true;
         }
@@ -923,7 +923,7 @@ fn serve(
         }
         thread::sleep(Duration::from_millis(100));
     }
-    let _=updates.send(Update::new("READY",format!("{} ready. [a] Ask · [p] AI OFF\nAI answers can be wrong. Check the cited original text.",model.file_name().unwrap_or_default().to_string_lossy())));
+    let _=updates.send(Update::new("READY",format!("{} 준비됨. 위 질문칸에 질문을 입력하고 Enter를 누르세요.\nAI 답변은 틀릴 수 있습니다. 답변 아래 근거 원문을 꼭 확인하세요.",model.file_name().unwrap_or_default().to_string_lossy())));
     while !cancel.load(Ordering::Acquire) {
         if server.0.try_wait().map_err(|e| e.to_string())?.is_some() {
             return Err(fail(
@@ -999,6 +999,18 @@ fn answer(
     if let Some(reply) = named_facility_reply(corpus, q) {
         return Ok(reply);
     }
+    if let Some((text, guide)) = crate::topic_hints::app_feature_reply(q) {
+        let sources = if corpus.iter().any(|d| d["id"] == guide) {
+            vec![guide.to_owned()]
+        } else {
+            vec![]
+        };
+        return Ok(Update {
+            phase: "READY".into(),
+            text,
+            sources,
+        });
+    }
     if ai_policy::needs_live_status(q) {
         return Err(fail(Code::Freshness,"오프라인 자료로 현재·미래의 운영·통행·경보 상태를 확인할 수 없습니다. 저장된 안내나 등록 상태는 실시간 확인이 아닙니다. 현재 현장 안내와 담당 기관의 확인이 필요합니다."));
     }
@@ -1009,7 +1021,8 @@ fn answer(
         Err(e) if matches!(e.code, Code::Schema | Code::Length) => ai_policy::fallback_queries(q),
         Err(e) => return Err(e),
     };
-    let mut found = search_processing::search(&query.to_string(), q, |query| {
+    let hints = crate::topic_hints::hints(q);
+    let mut found = search_processing::search_with_hints(&query.to_string(), q, &hints, |query| {
         let terms: Vec<_> = query.split_whitespace().map(str::to_lowercase).collect();
         Ok(corpus
             .iter()
@@ -1027,6 +1040,20 @@ fn answer(
             .cloned()
             .collect())
     })?;
+    // Field manuals yield to civilian guidance unless the question is about
+    // the field (they answered "what goes in a go-bag" with a combat kit).
+    if !crate::topic_hints::wants_field_manual(q) {
+        let civilian = found
+            .candidates
+            .iter()
+            .filter(|d| !crate::topic_hints::is_field_manual(d["id"].as_str().unwrap_or("")))
+            .count();
+        if civilian >= 2 {
+            found
+                .candidates
+                .retain(|d| !crate::topic_hints::is_field_manual(d["id"].as_str().unwrap_or("")));
+        }
+    }
     let bundles = crate::evidence_bundles::for_question(corpus, q);
     for bundle in &bundles {
         if !found.candidates.iter().any(|d| d["id"] == bundle["id"]) {
@@ -1134,7 +1161,7 @@ fn answer(
     }
     let _ = updates.send(Update::new(
         "ANSWERING",
-        "근거에서 답변 생성 중… [p] AI OFF로 취소할 수 있습니다.",
+        "근거에서 답변 생성 중… [p] AI OFF로 취소할 수 있습니다.\n\n※ 이 AI는 인터넷 없이 PC에서 동작하는 소형 모델로, 대형 AI 모델보다 느리고 답변이 안정적이지 않을 수 있습니다. 답변 아래 근거 원문을 꼭 확인해 주세요. ※",
     ));
     let allowed: Vec<_> = usable.iter().map(|d| d["id"].clone()).collect();
     client.stage("answer");
@@ -1214,22 +1241,10 @@ fn answer(
             format!("[{}] {}", i + 1, d["title"].as_str().unwrap())
         })
         .collect();
-    let quoted = usable
-        .iter()
-        .filter(|d| sources.iter().any(|id| d["id"] == *id))
-        .map(|d| {
-            format!(
-                "{}\n{}",
-                d["title"].as_str().unwrap_or(""),
-                d["body"].as_str().unwrap_or("")
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n");
     let scope = source_scopes(&usable);
     let required = crate::evidence_bundles::required_display(&usable);
     let arithmetic = calculation.map(|s| format!("\n\n{s}")).unwrap_or_default();
-    Ok(Update{phase:"READY".into(),text:format!("AI 생성 답변 · 원문 대조 필요\n질문: {q}\n\n{scope}{text}{arithmetic}\n\n{required}Sources supplied · [s] Open next source\n{}\n\n원문 근거 · 조건과 대상은 아래 원문을 함께 확인하세요\n{quoted}",labels.join("\n")),sources})
+    Ok(Update{phase:"READY".into(),text:format!("AI 생성 답변 · 원문 대조 필요\n질문: {q}\n\n{scope}{text}{arithmetic}\n\n{required}근거 자료 · [s]를 누르면 왼쪽에 원문을 모아 봅니다. 조건과 대상은 원문에서 확인하세요.\n{}",labels.join("\n")),sources})
 }
 
 fn repair_limit(reserved: usize, input_tokens: usize) -> Result<usize> {

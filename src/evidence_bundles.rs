@@ -171,6 +171,35 @@ pub fn neutralize_prohibition_labels(answer: &str) -> String {
 mod tests {
     use super::*;
     #[test]
+    fn air_raid_bundle_is_valid_and_matches_only_air_raid_questions() {
+        let root = crate::project_root().join("dev");
+        if !root.join("content-library/approved.json").exists() {
+            return;
+        }
+        let (docs, _) = crate::load(&root.join("content-library")).unwrap();
+        let mut corpus = crate::ai_corpus(&docs);
+        attach(&root, &mut corpus);
+        let ids = |q: &str| -> Vec<String> {
+            for_question(&corpus, q)
+                .iter()
+                .map(|b| b["id"].as_str().unwrap().to_owned())
+                .collect()
+        };
+        let hit = ids("공습 경보가 울리면 어떻게 해야 해?");
+        assert!(hit.contains(&"kmcc-civil-alert-2026".to_owned()), "{hit:?}");
+        let body = for_question(&corpus, "공습 경보가 울리면 어떻게 해야 해?")
+            .into_iter()
+            .find(|b| b["id"] == "kmcc-civil-alert-2026")
+            .unwrap()["body"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(body.contains("가까운 지정 대피소로 갑니다"));
+        assert!(
+            !ids("화상 입었을 때 응급처치 알려줘").contains(&"kmcc-civil-alert-2026".to_owned())
+        );
+    }
+    #[test]
     fn broad_labels_are_neutralized_without_rewriting_body_or_conditions() {
         let bodies = [
             (

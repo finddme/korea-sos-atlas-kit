@@ -14,6 +14,7 @@ use ratatui::{
     backend::CrosstermBackend,
     layout::Rect,
     style::{Color, Modifier, Style},
+    text::{Line, Span},
     widgets::Paragraph,
     Frame, Terminal,
 };
@@ -33,6 +34,7 @@ mod agentic_policy;
 mod ai_policy;
 mod ai_runtime;
 mod ai_stream;
+mod clipboard;
 mod console_width;
 mod energy_calc;
 mod evidence_bundles;
@@ -45,6 +47,7 @@ mod medical_facilities;
 mod search_processing;
 mod shelters;
 mod status;
+mod topic_hints;
 mod water_facilities;
 const URI_ESC: &percent_encoding::AsciiSet = &CONTROLS.add(b' ').add(b'%').add(b'#').add(b'?');
 const CATS: [&str; 12] = [
@@ -106,6 +109,7 @@ fn hash(b: &[u8]) -> String {
 fn load(root: &Path) -> Result<(Vec<Doc>, PathBuf), Box<dyn std::error::Error>> {
     if root.join("approved.json").exists() {
         let (mut docs, path) = library::load_approved(root)?;
+        docs.extend(library::load_public_manuals(root)?);
         docs.extend(shelters::load(root)?);
         docs.extend(medical_facilities::load(root)?);
         docs.extend(water_facilities::load(root)?);
@@ -307,6 +311,64 @@ fn style(bg: Option<u8>) -> Style {
         s
     }
 }
+/// Model answers use light Markdown. Keep `**emphasis**` (drawn bold by
+/// `put_rich`) but show `*` list markers as `-`.
+fn answer_display(text: &str) -> String {
+    text.lines()
+        .map(|l| {
+            let body = l.trim_start();
+            let indent = (l.len() - body.len()) / 2;
+            match body.strip_prefix("* ").or_else(|| body.strip_prefix("- ")) {
+                Some(rest) => format!("{}- {}", " ".repeat(indent), rest.trim_start()),
+                None => l.to_owned(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+/// Like `put`, drawing text between `**` markers in bold. `bold` carries the
+/// state across wrapped lines and resets at blank lines.
+fn put_rich(f: &mut Frame, y: u16, x: u16, s: &str, width: u16, st: Style, bold: &mut bool) {
+    if s.trim().is_empty() {
+        *bold = false;
+    }
+    let a = f.area();
+    let n = if x < a.width.saturating_sub(1) && y < a.height {
+        width.min(a.width - x - 1) as usize
+    } else {
+        0
+    };
+    let mut spans = Vec::new();
+    let mut used = 0;
+    for (k, part) in s.split("**").enumerate() {
+        if k > 0 {
+            *bold = !*bold;
+        }
+        let mut piece = String::new();
+        for c in part.chars() {
+            let w = c.width().unwrap_or(0);
+            if used + w > n {
+                break;
+            }
+            used += w;
+            piece.push(c);
+        }
+        if !piece.is_empty() {
+            let style = if *bold {
+                st.add_modifier(Modifier::BOLD)
+            } else {
+                st
+            };
+            spans.push(Span::styled(piece, style));
+        }
+    }
+    if n > 0 {
+        f.render_widget(
+            Paragraph::new(Line::from(spans)).style(st),
+            Rect::new(x, y, n as u16, 1),
+        );
+    }
+}
 fn put(f: &mut Frame, y: u16, x: u16, s: &str, width: u16, st: Style) {
     let a = f.area();
     if x < a.width.saturating_sub(1) && y < a.height {
@@ -322,6 +384,16 @@ struct App {
     ai_source_count: usize,
     ai_draft: String,
     ai_editing: bool,
+    ai_pending: Option<String>,
+    ai_phase: String,
+    ai_asked: bool,
+    // Which linked source is open in the left pane (1-based, 0 = none yet).
+    ai_source_shown: usize,
+    // AI sources shown together in the left pane (doc indices), the first
+    // wrapped line of each, and the doc the view last put in `opened`.
+    collection: Vec<usize>,
+    collection_starts: Vec<usize>,
+    collection_opened: Option<usize>,
     ai_offset: usize,
     query: String,
     draft: String,
@@ -343,6 +415,94 @@ struct Ai {
     text: String,
     #[serde(default)]
     seq: u64,
+}
+const AI_OFF_TEXT: &str = "AI가 꺼져 있습니다. 아래 질문칸에 질문을 쓰고 Enter를 누르면 AI를 켜고, 준비되는 대로 답합니다. 자료 검색과 열람에는 AI가 필요 없습니다.";
+fn str_width(s: &str) -> u16 {
+    s.chars().map(|c| c.width().unwrap_or(0) as u16).sum()
+}
+/// AI pane buttons on the row above the question box: (x offset, label, hit kind).
+fn ai_buttons(phase: &str, sources: usize, asked: bool, shown: usize) -> Vec<(u16, String, u8)> {
+    let mut labels = vec![(ai_button(phase).to_string(), 8u8)];
+    if sources > 0 {
+        // One source opens per press; the label shows which one is open.
+        labels.push((
+            if shown == 0 {
+                format!("[s 근거 원문 모아 보기 · {sources}건]")
+            } else {
+                format!("[s 다음 근거로 · {shown}/{sources}]")
+            },
+            10,
+        ));
+    }
+    if asked && matches!(phase, "READY" | "OFF" | "ERROR") {
+        labels.push(("[c 답변 복사]".into(), 11));
+    }
+    let mut x = 0;
+    labels
+        .into_iter()
+        .map(|(l, k)| {
+            let at = x;
+            x += str_width(&l) + 1;
+            (at, l, k)
+        })
+        .collect()
+}
+fn ai_button(phase: &str) -> &'static str {
+    match phase {
+        "" | "OFF" | "ERROR" => "[p AI 켜기]",
+        "UNAVAILABLE" => "[p AI 사용 불가 · 이유]",
+        "STARTING" => "[p 켜는 중 · 취소]",
+        "STOPPING" => "[끄는 중…]",
+        _ => "[p AI 끄기]",
+    }
+}
+/// Sends the typed question, starting the AI first when it is off. The
+/// question then waits until the model is READY (see the main loop).
+fn send_question(a: &mut App, engine: &mut ai_runtime::Controller) {
+    let q = a.ai_draft.trim().to_owned();
+    if q.is_empty() {
+        return;
+    }
+    a.ai_editing = false;
+    a.ai_offset = 0;
+    a.ai_asked = true;
+    match engine.status.phase.as_str() {
+        "READY" => engine.submit(q),
+        "" | "OFF" | "ERROR" | "STARTING" => {
+            engine.start();
+            match engine.status.phase.as_str() {
+                "STARTING" => {
+                    a.ai_pending = Some(q);
+                    a.notice = "AI를 켜는 중입니다. 준비되면 질문을 보냅니다.".into();
+                }
+                "UNAVAILABLE" => {
+                    a.notice = "AI를 쓸 수 없습니다. AI 답변 칸의 이유를 확인하세요.".into()
+                }
+                _ => a.notice = "AI를 정리하는 중입니다. 잠시 후 다시 보내세요.".into(),
+            }
+        }
+        "UNAVAILABLE" => a.notice = "AI를 쓸 수 없습니다. AI 답변 칸의 이유를 확인하세요.".into(),
+        _ => a.notice = "이전 질문을 처리하는 중입니다. 끝난 뒤 다시 보내세요.".into(),
+    }
+}
+/// `c`: the AI answer in the AI pane, otherwise the open document.
+fn copy_current(a: &mut App, docs: &[Doc], ai_raw: &str) {
+    let text = if a.view == 1 && a.ai_asked && !ai_raw.trim().is_empty() {
+        ai_raw.to_owned()
+    } else if let Some(i) = a.opened {
+        let d = &docs[i];
+        format!(
+            "{}\n{}\n\n{}\n\n{}",
+            d.title, d.source, d.display_body, d.record
+        )
+    } else {
+        a.notice = "복사할 답변이나 열린 문서가 없습니다.".into();
+        return;
+    };
+    a.notice = match clipboard::copy(&text) {
+        Ok(how) => format!("복사했습니다 · {how}"),
+        Err(e) => format!("복사하지 못했습니다: {e}"),
+    };
 }
 fn tabs(view: u8) -> Vec<(u16, String)> {
     let labels = [
@@ -509,7 +669,7 @@ fn draw(f: &mut Frame, a: &mut App, docs: &[Doc], rows: &[usize], ai: &Ai, bench
         if a.editing {
             "Search: [Enter] Apply  [Esc] Cancel  [Backspace] Delete · Empty input clears filter"
         } else {
-            "[/] Search  [Tab] Category  [↑↓] Select  [Enter] Open  [PgUp/Dn] Read  [o] Source  [i] Info  [q] Quit"
+            "[/] Search  [Tab] Category  [↑↓] Select  [Enter] Open  [PgUp/Dn] Read  [o] Source  [i] Info  [c] Copy  [q] Quit"
         },
         w - 3,
         muted,
@@ -619,7 +779,62 @@ fn draw(f: &mut Frame, a: &mut App, docs: &[Doc], rows: &[usize], ai: &Ai, bench
     }
     let bw = (if a.view == 1 { half } else { w }) - 5;
     put(f, split, 2, " Source document ", bw, style(Some(244)));
-    if let Some(i) = a.opened {
+    if !a.collection.is_empty() && a.opened != a.collection_opened {
+        // Another document was opened or the view was closed.
+        a.collection.clear();
+    }
+    if !a.collection.is_empty() && !a.info {
+        let n = a.collection.len();
+        let mut body: Vec<String> = Vec::new();
+        a.collection_starts.clear();
+        for (k, &i) in a.collection.iter().enumerate() {
+            a.collection_starts.push(body.len());
+            let d = &docs[i];
+            body.extend(wrap(
+                &format!("── [{}/{n}] {} ──", k + 1, d.title),
+                bw as usize,
+            ));
+            body.extend(wrap(&d.source, bw as usize));
+            body.push(String::new());
+            body.extend(wrap(&d.display_body, bw as usize));
+            body.push(String::new());
+        }
+        let visible = bottom.saturating_sub(split + 3).max(1) as usize;
+        a.offset = a.offset.min(body.len().saturating_sub(visible));
+        let current = a
+            .collection_starts
+            .iter()
+            .rposition(|s| *s <= a.offset)
+            .unwrap_or(0);
+        a.opened = Some(a.collection[current]);
+        a.collection_opened = a.opened;
+        a.ai_source_shown = current + 1;
+        put(
+            f,
+            split,
+            2,
+            &format!(
+                " 근거 원문 모음 · {}/{n} · {}–{}/{}줄 ",
+                current + 1,
+                a.offset + 1,
+                (a.offset + visible).min(body.len()),
+                body.len()
+            ),
+            bw,
+            style(Some(244)),
+        );
+        for (row, t) in body.iter().skip(a.offset).take(visible).enumerate() {
+            let line = a.offset + row;
+            let st = if a.collection_starts.contains(&line) {
+                normal.add_modifier(Modifier::BOLD)
+            } else {
+                normal
+            };
+            put(f, split + 1 + row as u16, 2, t, bw, st)
+        }
+        put(f, bottom - 1, 20, "[Source file]", 15, normal);
+        put(f, bottom - 1, 36, "[Info]", 6, normal);
+    } else if let Some(i) = a.opened {
         let d = &docs[i];
         put(
             f,
@@ -676,21 +891,7 @@ fn draw(f: &mut Frame, a: &mut App, docs: &[Doc], rows: &[usize], ai: &Ai, bench
     }
     put(f, bottom - 1, 2, "[Close document]", 16, style(Some(164)));
     if a.view == 1 {
-        put(
-            f,
-            split,
-            half + 2,
-            &format!(
-                " AI answer / {} ",
-                if ai.phase.is_empty() {
-                    "OFF"
-                } else {
-                    &ai.phase
-                }
-            ),
-            w - half - 4,
-            style(Some(21)),
-        );
+        let pw = w - half - 4;
         let text = if bench || !ai.phase.is_empty() {
             if ai.text.is_empty() {
                 format!("Lifecycle benchmark · {}", ai.phase)
@@ -698,47 +899,89 @@ fn draw(f: &mut Frame, a: &mut App, docs: &[Doc], rows: &[usize], ai: &Ai, bench
                 ai.text.clone()
             }
         } else {
-            "Click AI ON to load the local model. No model is running.".into()
+            AI_OFF_TEXT.into()
         };
-        let lines = wrap(&text, (w - half - 5) as usize);
-        let max = bottom.saturating_sub(split + 3).max(1) as usize;
-        for (i, t) in lines
-            .iter()
-            .skip(a.ai_offset.min(lines.len().saturating_sub(max)))
-            .take(max)
-            .enumerate()
-        {
-            put(f, split + 2 + i as u16, half + 2, t, w - half - 5, normal)
-        }
-        let prompt = if a.ai_editing {
-            format!("AI question: {}▏  [Enter] Send [Esc] Cancel", a.ai_draft)
+        let lines = wrap(&answer_display(&text), (w - half - 5) as usize);
+        // Answer on top, buttons and the question box at the bottom.
+        let first = split + 1;
+        let max = bottom.saturating_sub(first + 3).max(1) as usize;
+        let skip = a.ai_offset.min(lines.len().saturating_sub(max));
+        let phase = if ai.phase.is_empty() {
+            "OFF"
         } else {
-            "[a] Ask AI · [p] AI ON/OFF · [s] Source · Scroll answer with mouse".into()
+            &ai.phase
+        };
+        let range = if lines.len() > max {
+            format!(
+                " · {}–{}/{}줄",
+                skip + 1,
+                (skip + max).min(lines.len()),
+                lines.len()
+            )
+        } else {
+            String::new()
+        };
+        put(
+            f,
+            split,
+            half + 2,
+            &format!(" AI 답변 / {phase}{range} "),
+            pw,
+            style(Some(21)),
+        );
+        let mut bold = false;
+        for t in &lines[..skip] {
+            if t.trim().is_empty() {
+                bold = false;
+            }
+            bold ^= t.matches("**").count() % 2 == 1;
+        }
+        for (i, t) in lines.iter().skip(skip).take(max).enumerate() {
+            put_rich(
+                f,
+                first + i as u16,
+                half + 2,
+                t,
+                w - half - 5,
+                normal,
+                &mut bold,
+            )
+        }
+        for (x, label, _) in ai_buttons(phase, a.ai_source_count, a.ai_asked, a.ai_source_shown) {
+            put(
+                f,
+                bottom - 2,
+                half + 2 + x,
+                &label,
+                str_width(&label),
+                normal,
+            );
+        }
+        let question = if a.ai_editing {
+            format!(" 질문 > {}▏", a.ai_draft)
+        } else {
+            " 질문 > 여기를 클릭하거나 [a]를 누르고 질문을 입력하세요".into()
         };
         put(
             f,
             bottom - 1,
             half + 2,
-            &if a.ai_source_count > 0 {
-                format!("[s Open next source · {}]", a.ai_source_count)
-            } else {
-                "No linked sources · [/] Search".into()
-            },
-            w - half - 4,
-            normal,
+            &question,
+            pw,
+            style(Some(if a.ai_editing { 254 } else { 250 })),
         );
-        put(
-            f,
-            h - 2,
-            1,
-            if bench {
-                "Lifecycle benchmark · Driver-controlled"
-            } else {
-                &prompt
-            },
-            w - 3,
-            muted,
-        )
+        if bench {
+            put(
+                f,
+                h - 2,
+                1,
+                "Lifecycle benchmark · Driver-controlled",
+                w - 3,
+                muted,
+            )
+        } else if a.ai_editing {
+            put(f, h - 2, half + 2, "[Enter] 보내기 · [Esc] 닫기", pw, muted)
+        }
     }
     put(f, h - 1, 1, &a.notice, w - 3, normal);
 }
@@ -748,9 +991,6 @@ fn hit(x: u16, y: u16, w: u16, h: u16, a: &App, count: usize) -> Option<(u8, usi
     }
     if y == 0 && x >= w - 24 {
         return Some((8, 0));
-    }
-    if a.view == 1 && y == h - 2 {
-        return Some((9, 0));
     }
     if y == 1 {
         for (i, (left, t)) in tabs(a.view).iter().enumerate() {
@@ -763,8 +1003,23 @@ fn hit(x: u16, y: u16, w: u16, h: u16, a: &App, count: usize) -> Option<(u8, usi
         return None;
     }
     let (edge, half, split, bottom) = geometry(w, h, a.view);
-    if a.view == 1 && y == bottom - 1 && x >= half + 2 && x < w - 2 {
-        return Some((10, 0));
+    if a.view == 1 && x >= half + 2 && x < w - 2 {
+        if y == bottom - 1 {
+            return Some((9, 0));
+        }
+        if y == bottom - 2 {
+            let rel = x - (half + 2);
+            for (at, label, kind) in ai_buttons(
+                &a.ai_phase,
+                a.ai_source_count,
+                a.ai_asked,
+                a.ai_source_shown,
+            ) {
+                if rel >= at && rel < at + str_width(&label) {
+                    return Some((kind, 0));
+                }
+            }
+        }
     }
     let sy = if w >= 115 { 1 } else { 2 };
     let sx = if w >= 115 {
@@ -1013,23 +1268,52 @@ fn narrow_for_console(docs: &mut [Doc]) {
 fn ai_corpus(docs: &[Doc]) -> Vec<serde_json::Value> {
     docs.iter().map(|d| serde_json::json!({"id":d.id,"title":d.title,"body":d.body,"original_uri":d.original_uri})).collect()
 }
-fn open_ai_source(a: &mut App, docs: &[Doc], ids: &[String], cursor: &mut usize) {
+/// `s`: the first press gathers every linked source into one scrollable view
+/// in the left pane; later presses jump to the next source in it.
+fn open_ai_source(a: &mut App, docs: &[Doc], ids: &[String]) {
     if ids.is_empty() {
         a.notice = "연결된 근거가 없습니다. [/] 일반 검색을 이용하세요.".into();
         return;
     }
-    for _ in 0..ids.len() {
-        let n = *cursor % ids.len();
-        *cursor = n + 1;
-        if let Some(i) = docs.iter().position(|d| d.id == ids[n]) {
-            a.opened = Some(i);
-            a.offset = 0;
-            a.info = false;
-            a.notice = format!("Source {}/{} · {}", n + 1, ids.len(), docs[i].title);
-            return;
-        }
+    let found: Vec<usize> = ids
+        .iter()
+        .filter_map(|id| docs.iter().position(|d| &d.id == id))
+        .collect();
+    if found.is_empty() {
+        a.notice = "이 자료는 현재 목록에 없습니다. [/] 일반 검색으로 다시 찾아보세요.".into();
+        return;
     }
-    a.notice = "이 자료는 현재 목록에 없습니다. [/] 일반 검색으로 다시 찾아보세요.".into();
+    a.info = false;
+    if a.collection != found || a.opened != a.collection_opened {
+        a.collection = found;
+        a.collection_starts.clear();
+        a.opened = Some(a.collection[0]);
+        a.collection_opened = a.opened;
+        a.offset = 0;
+        a.ai_source_shown = 1;
+        a.notice = format!(
+            "근거 원문 {}건을 왼쪽에 모았습니다. 스크롤해서 읽고, [s]를 누르면 다음 자료로 건너뜁니다.",
+            a.collection.len()
+        );
+        return;
+    }
+    let n = a.collection.len();
+    let current = a
+        .collection_starts
+        .iter()
+        .rposition(|s| *s <= a.offset)
+        .unwrap_or(0);
+    let next = (current + 1) % n;
+    a.offset = a.collection_starts.get(next).copied().unwrap_or(0);
+    a.ai_source_shown = next + 1;
+    a.opened = Some(a.collection[next]);
+    a.collection_opened = a.opened;
+    a.notice = format!(
+        "근거 원문 {}/{} · {}",
+        next + 1,
+        n,
+        docs[a.collection[next]].title
+    );
 }
 fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
     enable_raw_mode()?;
@@ -1043,7 +1327,6 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
     let root = layout::data_root(pdf);
     let corpus = ai_corpus(docs);
     let mut engine = ai_runtime::Controller::new(root, corpus);
-    let mut source_cursor = 0;
     let mut dirty = true;
     let mut ai_raw = String::new();
     loop {
@@ -1051,9 +1334,26 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
             if engine.poll() {
                 dirty = true;
                 a.ai_offset = 0;
-                source_cursor = 0;
+                a.ai_source_shown = 0;
+                a.collection.clear();
+            }
+            if a.ai_pending.is_some() {
+                match engine.status.phase.as_str() {
+                    "READY" => {
+                        engine.submit(a.ai_pending.take().unwrap());
+                        a.notice.clear();
+                        dirty = true;
+                    }
+                    "STARTING" => {}
+                    _ => {
+                        a.ai_pending = None;
+                        a.notice = "AI가 켜지지 않아 질문을 보내지 못했습니다. AI 답변 칸의 안내를 확인하세요.".into();
+                        dirty = true;
+                    }
+                }
             }
             a.ai_source_count = engine.status.sources.len();
+            a.ai_phase = engine.status.phase.clone();
             if ai.phase != engine.status.phase || ai_raw != engine.status.text {
                 ai.phase = engine.status.phase.clone();
                 ai_raw = engine.status.text.clone();
@@ -1105,11 +1405,7 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
                 }
                 if a.ai_editing {
                     match k.code {
-                        KeyCode::Enter => {
-                            engine.submit(a.ai_draft.clone());
-                            a.ai_editing = false;
-                            a.ai_offset = 0;
-                        }
+                        KeyCode::Enter => send_question(&mut a, &mut engine),
                         KeyCode::Esc => a.ai_editing = false,
                         KeyCode::Backspace => {
                             a.ai_draft.pop();
@@ -1143,23 +1439,19 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
                         }
                         KeyCode::Char('a') if state.is_none() => {
                             a.view = 1;
-                            if engine.status.phase == "READY" {
-                                a.ai_editing = true;
-                            } else {
-                                a.notice = "Start AI and wait for READY before asking.".into();
-                            }
+                            a.ai_editing = true;
                         }
                         KeyCode::Char('s') if a.view == 1 => {
-                            open_ai_source(
-                                &mut a,
-                                docs,
-                                &engine.status.sources,
-                                &mut source_cursor,
-                            );
+                            open_ai_source(&mut a, docs, &engine.status.sources);
                         }
                         KeyCode::Char('1') => a.view = 0,
-                        KeyCode::Char('2') => a.view = if a.view == 1 { 0 } else { 1 },
+                        KeyCode::Char('2') => {
+                            a.view = if a.view == 1 { 0 } else { 1 };
+                            // Opening the AI pane focuses its question box.
+                            a.ai_editing = a.view == 1 && state.is_none();
+                        }
                         KeyCode::Char('3') => a.view = 2,
+                        KeyCode::Char('c') => copy_current(&mut a, docs, &ai_raw),
                         KeyCode::Char('4') => a.notice = maps::launch(pdf),
                         KeyCode::Char('m') => {
                             if let Some(i) = a.opened {
@@ -1225,13 +1517,12 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
                 match m.kind {
                     MouseEventKind::Down(MouseButton::Left) => {
                         if let Some((kind, n)) = target {
+                            if !matches!(kind, 8..=11) {
+                                a.ai_editing = false;
+                            }
                             match kind {
-                                10 => open_ai_source(
-                                    &mut a,
-                                    docs,
-                                    &engine.status.sources,
-                                    &mut source_cursor,
-                                ),
+                                11 => copy_current(&mut a, docs, &ai_raw),
+                                10 => open_ai_source(&mut a, docs, &engine.status.sources),
                                 8 if state.is_none() => {
                                     engine.toggle();
                                     a.view = 1;
@@ -1239,12 +1530,8 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
                                     a.ai_offset = 0;
                                 }
                                 9 if state.is_none() => {
-                                    if engine.status.phase == "READY" {
-                                        a.ai_editing = true;
-                                        a.editing = false;
-                                    } else {
-                                        a.notice = "Click AI ON and wait for READY.".into();
-                                    }
+                                    a.ai_editing = true;
+                                    a.editing = false;
                                 }
                                 0 if n == 3 => a.notice = maps::launch(pdf),
                                 0 => {
@@ -1257,7 +1544,8 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
                                     } else {
                                         n as u8
                                     };
-                                    a.editing = false
+                                    a.editing = false;
+                                    a.ai_editing = a.view == 1 && state.is_none();
                                 }
                                 1 => {
                                     a.draft = a.query.clone();
@@ -1402,6 +1690,28 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     #[test]
+    fn answer_markdown_keeps_emphasis_as_bold_and_plain_list_markers() {
+        assert_eq!(
+            answer_display("**청소년:**\n*   감정을 적기\n    *   하위 항목\n- 이미 대시"),
+            "**청소년:**\n- 감정을 적기\n  - 하위 항목\n- 이미 대시"
+        );
+        let mut terminal = Terminal::new(TestBackend::new(30, 2)).unwrap();
+        terminal
+            .draw(|f| {
+                let mut bold = false;
+                put_rich(f, 0, 0, "a **굵게** b", 28, style(None), &mut bold);
+                put_rich(f, 1, 0, "**열림", 28, style(None), &mut bold);
+                assert!(bold);
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer();
+        let row: String = (0..12).map(|x| buf[(x, 0)].symbol().to_string()).collect();
+        assert!(!row.contains('*'));
+        assert!(buf[(2, 0)].modifier.contains(Modifier::BOLD));
+        assert!(!buf[(0, 0)].modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
     fn ai_source_button_opens_original_even_after_off_or_failure() {
         let root = crate::project_root().join("dev/content-library");
         let (docs, _) = load(&root).unwrap();
@@ -1411,11 +1721,16 @@ mod tests {
             ai_source_count: 1,
             ..App::default()
         };
-        let mut cursor = 0;
         let (_, half, _, bottom) = geometry(120, 30, 1);
-        assert_eq!(hit(half + 3, bottom - 1, 120, 30, &a, 1), Some((10, 0)));
+        let (at, _, kind) = ai_buttons("", 1, false, 0)[1].clone();
+        assert_eq!(kind, 10);
+        assert_eq!(
+            hit(half + 2 + at, bottom - 2, 120, 30, &a, 1),
+            Some((10, 0))
+        );
+        assert_eq!(hit(half + 3, bottom - 1, 120, 30, &a, 1), Some((9, 0)));
         for phase in ["READY", "ERROR", "OFF"] {
-            open_ai_source(&mut a, &docs, &["missing".into(), id.clone()], &mut cursor);
+            open_ai_source(&mut a, &docs, &["missing".into(), id.clone()]);
             assert_eq!(a.opened, Some(0));
             assert!(!a.info);
             assert_eq!(a.offset, 0);
@@ -1443,10 +1758,10 @@ mod tests {
                 .iter()
                 .map(|c| c.symbol())
                 .collect::<String>();
-            assert!(text.contains("Open next source"));
+            assert!(text.replace(' ', "").contains("[s다음근거로·"));
             assert!(text.replace(' ', "").contains("답변또는오류안내"));
         }
-        open_ai_source(&mut a, &docs, &[], &mut cursor);
+        open_ai_source(&mut a, &docs, &[]);
         assert!(a.notice.contains("일반 검색"));
     }
 

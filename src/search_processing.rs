@@ -100,11 +100,30 @@ pub struct SearchResult {
     pub tools: Vec<Value>,
     pub candidates: Vec<Value>,
 }
-pub fn search<F>(raw: &str, _question: &str, mut fetch: F) -> Result<SearchResult, String>
+#[cfg(test)]
+pub fn search<F>(raw: &str, question: &str, fetch: F) -> Result<SearchResult, String>
 where
     F: FnMut(&str) -> Result<Vec<Value>, String>,
 {
-    let initial = agentic_policy::queries(raw);
+    search_with_hints(raw, question, &[], fetch)
+}
+/// `hints` (fixed topic queries) run before the model's queries, so their
+/// documents come first when the result lists are interleaved.
+pub fn search_with_hints<F>(
+    raw: &str,
+    _question: &str,
+    hints: &[String],
+    mut fetch: F,
+) -> Result<SearchResult, String>
+where
+    F: FnMut(&str) -> Result<Vec<Value>, String>,
+{
+    let mut initial: Vec<String> = hints.to_vec();
+    for q in agentic_policy::queries(raw) {
+        if !initial.contains(&q) {
+            initial.push(q);
+        }
+    }
     let mut queue: Vec<(String, bool)> = initial.iter().cloned().map(|q| (q, false)).collect();
     let mut seen = vec![];
     let mut cursor = 0;

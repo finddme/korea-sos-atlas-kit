@@ -22,6 +22,7 @@ pub(super) fn report(root: &Path) -> Result<String, Error> {
         let r: Value = serde_json::from_slice(&fs::read(root.join(entry).join("record.json"))?)?;
         *licenses.entry(license_of(&r)).or_default() += 1;
     }
+    let public_manuals = library::load_public_manuals(root)?.len();
     let manuals = if library::default_includes_manuals(root)? {
         library::load_local_manuals(root)?.len()
     } else {
@@ -70,10 +71,13 @@ pub(super) fn report(root: &Path) -> Result<String, Error> {
         approved.len()
     ));
     s.push_str(&format!(
+        "| 공개 승인 교범 항목 (`local-manuals.json`의 public_approved) | {public_manuals} | 가능 — 미국 정부 저작물(퍼블릭 도메인)·배포 무제한 표기 확인 |\n"
+    ));
+    s.push_str(&format!(
         "| 로컬 전용 교범 항목 | {manuals} | 불가 — 개인 검증용 |\n"
     ));
     s.push_str(&format!(
-        "| 로컬 전용 공격·피난 자료 | {} | 불가 — 공식 공개 자료이지만 재배포 허가 미확인 |\n",
+        "| 로컬 전용 문서(국제기구·지자체 등) | {} | 불가 — 수정 금지·사전 서면 허가 필요 또는 이용 조건 확인 불가 |\n",
         local_total - manuals
     ));
     s.push_str(&format!(
@@ -82,7 +86,7 @@ pub(super) fn report(root: &Path) -> Result<String, Error> {
     ));
     s.push_str(&format!("| **합계** | **{}** | |\n\n", all.len()));
     s.push_str(&format!(
-        "공개판에 넣을 수 있는 본문은 공개 승인 {}개 문서와 공식 시설 데이터다. 로컬 전용 {}개는 공개판에서 빠진다.\n\n",
+        "공개판에 넣을 수 있는 본문은 공개 승인 {}개 문서, 공개 승인 교범 {public_manuals}항목과 공식 시설 데이터다. 로컬 전용 {}개는 공개판에서 빠진다.\n\n",
         approved.len(),
         local_total
     ));
