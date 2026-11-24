@@ -1,0 +1,18 @@
+{
+  "upstream": "https://github.com/organicmaps/organicmaps",
+  "source_commit": "d81f9197c6759f67aaed60f4f9c819e834dd02cd",
+  "flatpak_app_commit": "94710ca4dc483f8eb7dca05b1960e24e3d16066fce7128729e33ccb67e2a9b15",
+  "sdk": "org.kde.Sdk/x86_64/6.10",
+  "sdk_commit": "58a3c36a9e2cbd3fb3507d88d9195b3dcb8e8cde7bce86a0a0a5700a28a0ea18",
+  "runtime": "org.kde.Platform/x86_64/6.10",
+  "runtime_commit": "31742ff0f905913c512ea732960bbdeffa8306dcbebca45eeee62bfed0ca03a3",
+  "cmake_build_type": "Release",
+  "unity_batch_size": 8,
+  "parallel_jobs": 2,
+  "map_version": 260527,
+  "status": "desktop build and isolated offline GUI verification passed; physical GNSS validation blocked by absent receiver",
+  "viewer_sha256": "bbe5cc436060a0e95cb377d29fb59bd82b9d09e9332adb5428ccbab07ea37b45",
+  "patch_sha256": "c15afa5db40f9885b9e2ef232ed58e71b3f2ab68a9d25e0b50851344da87932b",
+  "qt_version": "6.10.3",
+  "evidence": "dev/poc/maps-ui/evidence"
+}

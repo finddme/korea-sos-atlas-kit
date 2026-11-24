@@ -1,0 +1,941 @@
+diff --git a/qt/CMakeLists.txt b/qt/CMakeLists.txt
+index 8bb67b99c2..2019be9078 100644
+--- a/qt/CMakeLists.txt
++++ b/qt/CMakeLists.txt
+@@ -1,8 +1,11 @@
++# Modified by Korea SOS Atlas Kit, 2026-11-14. Original Apache-2.0 license retained.
+ project(desktop)
+ 
+ QT6_ADD_RESOURCES(RES_SOURCES res/resources.qrc)
+ 
+ set(SRC
++  atlas_navigation.cpp
++  atlas_ui.hpp
+   about.cpp
+   about.hpp
+   bookmark_dialog.cpp
+diff --git a/qt/about.cpp b/qt/about.cpp
+index 9cba4a4ae8..c40cd87a2d 100644
+--- a/qt/about.cpp
++++ b/qt/about.cpp
+@@ -1,3 +1,4 @@
++// Modified by Korea SOS Atlas Kit, 2026-11-14: explicit upstream and modification notices.
+ #include "qt/about.hpp"
+ #include "qt/html_processor.hpp"
+ 
+@@ -34,6 +35,10 @@ AboutDialog::AboutDialog(QWidget * parent)
+   QLabel * versionLabel = new QLabel("Version: " + QString::fromStdString(platform.Version()));
+   versionLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+   versionBox->addWidget(versionLabel);
++  auto * projectCredit = new QLabel("<a href=\"https://organicmaps.app\">Organic Maps Project</a>");
++  projectCredit->setOpenExternalLinks(true);
++  versionBox->addWidget(projectCredit);
++  versionBox->addWidget(new QLabel(QObject::tr("Korea SOS Atlas Kit modified edition · UI changes 2026-11-14")));
+   // TODO: insert maps data version.
+   // versionBox->addWidget(new QLabel(QString("Data: ") + DESIGNER_DATA_VERSION));
+ 
+diff --git a/qt/atlas_ko.json b/qt/atlas_ko.json
+new file mode 100644
+index 0000000000..0a5c88e878
+--- /dev/null
++++ b/qt/atlas_ko.json
+@@ -0,0 +1,109 @@
++{
++  "Route and location": "경로 · 현재 위치",
++  "GPS: no position received": "GPS 위치 미수신 · 수동 출발지 선택 가능",
++  "Select a place, then choose Start or Destination.": "장소를 검색하거나 지도에서 선택한 뒤 출발·도착을 누르세요.",
++  "Walking": "도보",
++  "Driving": "차량",
++  "Start from current position": "현재 위치에서 출발",
++  "No fresh GPS position. Select a start on the map.": "현재 GPS 위치를 확인할 수 없습니다. 지도에서 출발지를 선택하세요.",
++  "Current position": "현재 위치",
++  "Find route": "경로 찾기",
++  "Choose both start and destination.": "출발지와 목적지를 모두 선택하세요.",
++  "Follow current position": "현재 위치 따라가기",
++  "Find a route first.": "먼저 경로를 계산하세요.",
++  "Use Start from current position before following.": "‘현재 위치에서 출발’을 선택한 뒤 따라가기를 누르세요.",
++  "Clear route": "경로 지우기",
++  "Saved places": "저장한 장소",
++  "Steps: distance from start": "이동 단계 · 출발점부터 누적 거리",
++  "Offline map: closures and hazards are not live.": "오프라인 지도 · 통제·재난 위험은 실시간 반영되지 않습니다.",
++  "Not selected": "미선택",
++  "Start: %1\nDestination: %2": "출발: %1\n도착: %2",
++  "GPS stale (%1 seconds). Last position: %2, %3": "GPS 수신 끊김 (%1초) · 마지막 위치: %2, %3",
++  "GPS received (%1 seconds ago): %2, %3": "위치 수신 (%1초 전): %2, %3",
++  "\nAccuracy: %1 m": "\n추정 정확도: %1 m",
++  "Calculating route...": "경로 계산 중...",
++  "Route unavailable. Check points and installed maps.": "경로를 만들 수 없습니다. 선택 위치와 보유 지도를 확인하세요.",
++  "%1 · %2 km · about %3 min": "%1 · %2 km · 약 %3분",
++  "\nRemaining: %1": "\n남은 거리: %1",
++  " - Korea SOS Atlas Kit modified edition": " · Korea SOS Atlas Kit 사용성 개선판",
++  "Place search": "장소 검색",
++  "Selected place": "선택한 장소",
++  "GPS unavailable. Choose a start manually.": "GPS 사용 불가 · 출발지를 직접 선택하세요.",
++  "Start": "출발",
++  "Destination": "도착",
++  "Via": "경유",
++  "Save place": "★ 저장",
++  "Name": "장소 이름",
++  "Note (optional)": "메모 (선택)",
++  "Saved": "저장됨",
++  "Place or address (e.g. Seoul Station)": "장소·주소 검색 (예: 서울역, 약국)",
++  "Korean/English: Ctrl+Space (2-set keyboard)": "한/영: Ctrl+Space · 두벌식",
++  "Everywhere": "보유 지도 전체",
++  "Viewport": "현재 화면",
++  "Offline Search": "장소 검색",
++  "Bookmarks and tracks": "저장한 장소 · 경로",
++  "Show on the map": "지도에서 보기",
++  "Close": "닫기",
++  "Delete": "삭제",
++  "Help": "도움말",
++  "About": "정보·라이선스",
++  "Exit": "종료",
++  "Preferences": "설정",
++  "Follow route": "경로 따라가기",
++  "Routing settings": "좌표·고급 설정",
++  "Clear selection": "선택 해제",
++  "Create Feature": "지도 편집",
++  "My position": "현재 위치",
++  "Edit Place": "장소 편집",
++  "GoStraight": "직진",
++  "TurnRight": "우회전",
++  "TurnSharpRight": "크게 우회전",
++  "TurnSlightRight": "오른쪽 방향",
++  "TurnLeft": "좌회전",
++  "TurnSharpLeft": "크게 좌회전",
++  "TurnSlightLeft": "왼쪽 방향",
++  "UTurnLeft": "왼쪽 유턴",
++  "UTurnRight": "오른쪽 유턴",
++  "EnterRoundAbout": "회전교차로 진입",
++  "LeaveRoundAbout": "회전교차로 나가기",
++  "StayOnRoundAbout": "회전교차로 진행",
++  "ReachedYourDestination": "목적지 도착",
++  "ExitHighwayToLeft": "왼쪽 출구",
++  "ExitHighwayToRight": "오른쪽 출구",
++  "None": "계속 이동",
++  "Type a place, then select a result.": "장소 이름을 입력하고 검색 결과를 선택하세요.",
++  "No results in installed maps. Try a nearby place or shorter name.": "보유 지도에 결과가 없습니다. 가까운 지명이나 짧은 이름으로 검색하세요.",
++  "%1 results · Select one to set start/destination or save.": "검색 결과 %1개 · 선택하여 출발·도착·저장",
++  "Cycling": "자전거",
++  "Transit": "대중교통",
++  "My Position": "현재 위치",
++  "Looking for position...": "위치 수신 중...",
++  "OK": "확인",
++  "Cancel": "취소",
++  "Ruler": "거리 재기",
++  "Start point": "출발점",
++  "Intermediate point": "경유점",
++  "Finish point": "도착점",
++  "Public transport": "대중교통",
++  "Isolines": "등고선",
++  "Outdoors": "야외 지도",
++  "Hiking": "등산로",
++  "Import KML, KMZ, GPX": "장소 가져오기",
++  "Export KMZ": "KMZ 내보내기",
++  "Export GPX": "GPX 내보내기",
++  "Export GeoJSON": "GeoJSON 내보내기",
++  "Place Page": "선택한 장소",
++  "Korea SOS Atlas Kit modified edition · UI changes 2026-11-14": "Korea SOS Atlas Kit 사용성 개선판 · 화면 수정 2026-11-14",
++  "StartAtEndOfStreet": "도로 끝에서 출발",
++  " (exit %1)": " (%1번째 출구)",
++  "_notice": "Korea SOS Atlas Kit Korean UI additions, 2026-11-14. Apache-2.0.",
++  "Bookmark": "저장한 장소",
++  "Yes": "예",
++  "Note": "메모",
++  "Categories": "분류",
++  "Coordinates": "위도·경도",
++  "Scale +": "확대",
++  "Scale -": "축소",
++  "Download Maps": "지도 내려받기",
++  "Select an icon; right-click any other point on the map.": "지도 아이콘을 클릭하세요. 빈 곳은 마우스 오른쪽 버튼으로 선택합니다."
++}
+diff --git a/qt/atlas_location.hpp b/qt/atlas_location.hpp
+new file mode 100644
+index 0000000000..bbdc48b3b1
+--- /dev/null
++++ b/qt/atlas_location.hpp
+@@ -0,0 +1,13 @@
++// Korea SOS Atlas Kit modification, 2026-11-14. Apache-2.0.
++#pragma once
++
++#include <cstdint>
++
++namespace qt
++{
++// Clock rollback or a future provider timestamp must never authorize live navigation.
++constexpr bool AtlasHasFreshFix(bool received, int64_t timestamp, int64_t now)
++{
++  return received && timestamp > 0 && timestamp <= now && now - timestamp <= 15;
++}
++}  // namespace qt
+diff --git a/qt/atlas_location_tests.cpp b/qt/atlas_location_tests.cpp
+new file mode 100644
+index 0000000000..ee07ac3738
+--- /dev/null
++++ b/qt/atlas_location_tests.cpp
+@@ -0,0 +1,10 @@
++// Korea SOS Atlas Kit modification, 2026-11-14. Apache-2.0.
++#include "atlas_location.hpp"
++
++static_assert(!qt::AtlasHasFreshFix(false, 100, 100));
++static_assert(!qt::AtlasHasFreshFix(true, 0, 10));
++static_assert(qt::AtlasHasFreshFix(true, 100, 100));
++static_assert(qt::AtlasHasFreshFix(true, 100, 115));
++static_assert(!qt::AtlasHasFreshFix(true, 100, 116));
++static_assert(!qt::AtlasHasFreshFix(true, 100, 99));
++int main() {}
+diff --git a/qt/atlas_navigation.cpp b/qt/atlas_navigation.cpp
+new file mode 100644
+index 0000000000..afde4931cc
+--- /dev/null
++++ b/qt/atlas_navigation.cpp
+@@ -0,0 +1,209 @@
++// Korea SOS Atlas Kit modification, 2026-11-14. Apache-2.0; upstream notices retained.
++#include "qt/mainwindow.hpp"
++#include "qt/atlas_location.hpp"
++#include "qt/draw_widget.hpp"
++#include "map/framework.hpp"
++#include "geometry/mercator.hpp"
++#include "routing/route.hpp"
++#include <QtCore/QDateTime>
++#include <QtCore/QTimer>
++#include <QtCore/QFile>
++#include <QtCore/QJsonDocument>
++#include <QtCore/QJsonObject>
++#include <cmath>
++#include <QtWidgets/QComboBox>
++#include <QtWidgets/QDockWidget>
++#include <QtWidgets/QLabel>
++#include <QtWidgets/QListWidget>
++#include <QtWidgets/QPushButton>
++#include <QtWidgets/QVBoxLayout>
++
++namespace qt
++{
++void MainWindow::CreateAtlasNavigation()
++{
++  auto * dock = new QDockWidget(tr("Route and location"), this);
++  dock->setFeatures(QDockWidget::NoDockWidgetFeatures);
++  auto * panel = new QWidget(dock);
++  auto * layout = new QVBoxLayout(panel);
++  m_atlasGps = new QLabel(tr("GPS: no position received"), panel);
++  m_atlasGps->setWordWrap(true);
++  m_atlasEndpoints = new QLabel(tr("Select a place, then choose Start or Destination."), panel);
++  m_atlasEndpoints->setWordWrap(true);
++  m_atlasMode = new QComboBox(panel);
++  m_atlasMode->setObjectName("atlasTravelMode");
++  m_atlasMode->addItem(tr("Walking"), static_cast<int>(routing::RouterType::Pedestrian));
++  m_atlasMode->addItem(tr("Driving"), static_cast<int>(routing::RouterType::Vehicle));
++  auto & manager = GetFramework().GetRoutingManager();
++  manager.SetRouter(routing::RouterType::Pedestrian);
++  connect(m_atlasMode, &QComboBox::currentIndexChanged, this, [this](int)
++  {
++    auto & rm = GetFramework().GetRoutingManager();
++    rm.SetRouter(static_cast<routing::RouterType>(m_atlasMode->currentData().toInt()));
++    m_atlasSteps->clear();
++    if (rm.GetRoutePoints().size() >= 2) rm.BuildRoute();
++  });
++  auto * current = new QPushButton(tr("Start from current position"), panel);
++  connect(current, &QPushButton::clicked, this, [this]
++  {
++    if (!AtlasHasFreshFix(m_atlasHasFix, m_atlasFixTime, QDateTime::currentSecsSinceEpoch()))
++    { m_locationService->Start(); m_atlasGps->setText(tr("No fresh GPS position. Select a start on the map.")); return; }
++    RouteMarkData point;
++    point.m_pointType = RouteMarkType::Start;
++    point.m_isMyPosition = true;
++    point.m_position = mercator::FromLatLon(m_atlasFix.GetLatLon());
++    point.m_title = tr("Current position").toStdString();
++    auto & rm = GetFramework().GetRoutingManager();
++    rm.AddRoutePoint(std::move(point));
++    if (rm.GetRoutePoints().size() >= 2) rm.BuildRoute();
++    OnMyPosition();
++  });
++  auto * build = new QPushButton(tr("Find route"), panel);
++  connect(build, &QPushButton::clicked, this, [this]
++  {
++    auto & rm = GetFramework().GetRoutingManager();
++    if (rm.GetRoutePoints().size() >= 2) rm.BuildRoute();
++    else m_atlasStatus->setText(tr("Choose both start and destination."));
++  });
++  auto * follow = new QPushButton(tr("Follow current position"), panel);
++  connect(follow, &QPushButton::clicked, this, [this]
++  {
++    if (!AtlasHasFreshFix(m_atlasHasFix, m_atlasFixTime, QDateTime::currentSecsSinceEpoch()))
++    { m_locationService->Start(); m_atlasGps->setText(tr("No fresh GPS position. Select a start on the map.")); return; }
++    auto & rm = GetFramework().GetRoutingManager();
++    if (!rm.IsRouteBuilt()) { m_atlasStatus->setText(tr("Find a route first.")); return; }
++    auto const points = rm.GetRoutePoints();
++    if (points.empty() || !points.front().m_isMyPosition)
++    { m_atlasStatus->setText(tr("Use Start from current position before following.")); return; }
++    rm.FollowRoute();
++  });
++  auto * clear = new QPushButton(tr("Clear route"), panel);
++  connect(clear, &QPushButton::clicked, this, &MainWindow::OnClearRoute);
++  auto * saved = new QPushButton(tr("Saved places"), panel);
++  connect(saved, &QPushButton::clicked, this, &MainWindow::OnBookmarksAction);
++  m_atlasStatus = new QLabel(tr("Choose both start and destination."), panel);
++  m_atlasStatus->setWordWrap(true);
++  m_atlasSteps = new QListWidget(panel);
++  m_atlasSteps->setWordWrap(true);
++  layout->addWidget(m_atlasGps);
++  layout->addWidget(current);
++  layout->addWidget(m_atlasEndpoints);
++  auto * pointHelp = new QLabel(tr("Select an icon; right-click any other point on the map."), panel);
++  pointHelp->setWordWrap(true);
++  layout->addWidget(pointHelp);
++  layout->addWidget(m_atlasMode);
++  layout->addWidget(build);
++  layout->addWidget(follow);
++  layout->addWidget(clear);
++  layout->addWidget(saved);
++  layout->addWidget(m_atlasStatus);
++  layout->addWidget(new QLabel(tr("Steps: distance from start"), panel));
++  layout->addWidget(m_atlasSteps);
++  auto * notice = new QLabel(tr("Offline map: closures and hazards are not live."), panel);
++  notice->setWordWrap(true);
++  layout->addWidget(notice);
++  auto * credit = new QLabel("Map data © <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> and <a href=\"https://organicmaps.app\">Organic Maps</a>", panel);
++  credit->setOpenExternalLinks(true);
++  credit->setWordWrap(true);
++  layout->addWidget(credit);
++  auto * projectCredit = new QLabel("<a href=\"https://organicmaps.app\">Organic Maps Project</a>", panel);
++  projectCredit->setOpenExternalLinks(true);
++  layout->addWidget(projectCredit);
++  dock->setWidget(panel);
++  dock->setMinimumWidth(290);
++  addDockWidget(Qt::LeftDockWidgetArea, dock);
++  auto * timer = new QTimer(this);
++  connect(timer, &QTimer::timeout, this, &MainWindow::UpdateAtlasNavigation);
++  timer->start(1000);
++}
++
++void MainWindow::UpdateAtlasNavigation()
++{
++  auto & rm = GetFramework().GetRoutingManager();
++  // Local handoff from the reviewed SOS facility catalog. No online geocoding.
++  auto const requestPath = qEnvironmentVariable("SOS_ATLAS_REQUEST");
++  QFile request(requestPath);
++  if (!requestPath.isEmpty() && request.exists() && request.size() < 8192 && request.open(QIODevice::ReadOnly))
++  {
++    auto const data = QJsonDocument::fromJson(request.readAll()).object();
++    request.close();
++    request.remove();
++    double const lat = data.value("lat").toDouble(0), lon = data.value("lon").toDouble(0);
++    auto const name = data.value("name").toString();
++    if (std::isfinite(lat) && std::isfinite(lon) && lat >= 33 && lat <= 39 && lon >= 124 && lon <= 132 && !name.isEmpty())
++    {
++      RouteMarkData target;
++      target.m_pointType = RouteMarkType::Finish;
++      target.m_position = mercator::FromLatLon(lat, lon);
++      target.m_title = name.toStdString();
++      auto const position = target.m_position;
++      rm.AddRoutePoint(std::move(target));
++      GetFramework().ShowRect(mercator::RectByCenterXYAndSizeInMeters(position, 1000));
++      if (rm.GetRoutePoints().size() >= 2) rm.BuildRoute();
++      raise();
++      activateWindow();
++    }
++  }
++  if (!AtlasHasFreshFix(m_atlasHasFix, m_atlasFixTime, QDateTime::currentSecsSinceEpoch()) && rm.IsRoutingFollowing())
++    rm.DisableFollowMode();
++  QString start = tr("Not selected"), finish = start;
++  for (auto const & p : rm.GetRoutePoints())
++  {
++    auto const ll = mercator::ToLatLon(p.m_position);
++    QString name = QString::fromStdString(p.m_title);
++    if (name.isEmpty()) name = QString("%1, %2").arg(ll.m_lat, 0, 'f', 5).arg(ll.m_lon, 0, 'f', 5);
++    if (p.m_pointType == RouteMarkType::Start) start = p.m_isMyPosition ? tr("Current position") : name;
++    if (p.m_pointType == RouteMarkType::Finish) finish = name;
++  }
++  m_atlasEndpoints->setText(tr("Start: %1\nDestination: %2").arg(start, finish));
++  {
++    auto const selected = m_atlasMode->findData(static_cast<int>(rm.GetRouter()));
++    if (selected >= 0 && selected != m_atlasMode->currentIndex())
++    { m_atlasMode->blockSignals(true); m_atlasMode->setCurrentIndex(selected); m_atlasMode->blockSignals(false); }
++  }
++  if (m_atlasHasFix)
++  {
++    auto const age = QDateTime::currentSecsSinceEpoch() - m_atlasFixTime;
++    m_atlasGps->setText((!AtlasHasFreshFix(m_atlasHasFix, m_atlasFixTime, QDateTime::currentSecsSinceEpoch()) ? tr("GPS stale (%1 seconds). Last position: %2, %3") : tr("GPS received (%1 seconds ago): %2, %3"))
++      .arg(age).arg(m_atlasFix.m_latitude, 0, 'f', 5).arg(m_atlasFix.m_longitude, 0, 'f', 5)
++      + tr("\nAccuracy: %1 m").arg(m_atlasFix.m_horizontalAccuracy, 0, 'f', 0));
++  }
++  if (rm.IsRouteBuilding()) { m_atlasStatus->setText(tr("Calculating route...")); m_atlasSteps->clear(); return; }
++  auto const * route = rm.RoutingSession().GetRoute();
++  if (!rm.IsRouteBuilt() || !route)
++  {
++    m_atlasSteps->clear();
++    if (rm.GetRoutePoints().empty()) m_atlasStatus->setText(tr("Choose both start and destination."));
++    else if (rm.GetRoutePoints().size() >= 2) m_atlasStatus->setText(tr("Route unavailable. Check points and installed maps."));
++    return;
++  }
++  bool const walking = rm.GetRouter() == routing::RouterType::Pedestrian;
++  QString mode = walking ? tr("Walking") : tr("Driving");
++  if (rm.GetRouter() == routing::RouterType::Bicycle) mode = tr("Cycling");
++  if (rm.GetRouter() == routing::RouterType::Transit) mode = tr("Transit");
++  if (rm.GetRouter() == routing::RouterType::Ruler) mode = tr("Ruler");
++  QString status = tr("%1 · %2 km · about %3 min").arg(mode)
++    .arg(route->GetTotalDistanceMeters() / 1000, 0, 'f', 2).arg(static_cast<int>(route->GetTotalTimeSec() / 60 + 0.5));
++  if (rm.IsRoutingFollowing())
++  {
++    routing::FollowingInfo info;
++    rm.GetRouteFollowingInfo(info);
++    if (info.IsValid()) status += tr("\nRemaining: %1").arg(QString::fromStdString(info.m_distToTarget.ToString()));
++  }
++  m_atlasStatus->setText(status);
++  QStringList steps;
++  for (auto const & segment : route->GetRouteSegments())
++  {
++    auto const & turn = segment.GetTurn();
++    if (turn.IsTurnNone()) continue;
++    auto const name = walking ? DebugPrint(turn.m_pedestrianTurn) : DebugPrint(turn.m_turn);
++    auto instruction = QCoreApplication::translate("Atlas", name.c_str());
++    if (turn.m_exitNum > 0) instruction += tr(" (exit %1)").arg(turn.m_exitNum);
++    steps << QString("%1 m · %2 · %3").arg(segment.GetDistFromBeginningMeters(), 0, 'f', 0)
++      .arg(instruction, QString::fromStdString(segment.GetRoadNameInfo().m_name));
++  }
++  if (steps.join('\n') != m_atlasStepText)
++  { m_atlasStepText = steps.join('\n'); m_atlasSteps->clear(); m_atlasSteps->addItems(steps); }
++  else if (m_atlasSteps->count() == 0) m_atlasSteps->addItems(steps);
++}
++} // namespace qt
+diff --git a/qt/atlas_ui.hpp b/qt/atlas_ui.hpp
+new file mode 100644
+index 0000000000..f19f122a29
+--- /dev/null
++++ b/qt/atlas_ui.hpp
+@@ -0,0 +1,22 @@
++// Korea SOS Atlas Kit modification, 2026-11-14. Apache-2.0; upstream notices retained.
++#pragma once
++#include <QtCore/QCoreApplication>
++#include <QtCore/QFile>
++#include <QtCore/QJsonDocument>
++#include <QtCore/QJsonObject>
++#include <QtCore/QTranslator>
++
++class AtlasTranslator final : public QTranslator
++{
++  QJsonObject m_strings;
++public:
++  AtlasTranslator() { QFile f(":/atlas/ko.json"); if (f.open(QIODevice::ReadOnly)) m_strings = QJsonDocument::fromJson(f.readAll()).object(); }
++  bool isEmpty() const override { return m_strings.isEmpty(); }
++  QString translate(char const *, char const * source, char const * = nullptr, int = -1) const override
++  { return m_strings.value(QString::fromUtf8(source)).toString(); }
++};
++inline void InstallAtlasTranslation()
++{
++  static AtlasTranslator translator;
++  QCoreApplication::installTranslator(&translator);
++}
+diff --git a/qt/bookmark_dialog.cpp b/qt/bookmark_dialog.cpp
+index c4598bfa42..89076c98cf 100644
+--- a/qt/bookmark_dialog.cpp
++++ b/qt/bookmark_dialog.cpp
+@@ -1,3 +1,4 @@
++// Modified by Korea SOS Atlas Kit, 2026-11-14: Korean usability improvements. Original license retained.
+ #include "qt/bookmark_dialog.hpp"
+ 
+ #include "map/bookmark_helpers.hpp"
+@@ -53,6 +54,7 @@ BookmarkDialog::BookmarkDialog(QWidget * parent, Framework & framework)
+   m_tree->setHeaderLabels(columnLabels);
+   m_tree->setSelectionBehavior(QAbstractItemView::SelectionBehavior::SelectItems);
+   connect(m_tree, &QTreeWidget::itemClicked, this, &BookmarkDialog::OnItemClick);
++  connect(m_tree, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem * item, int) { OnItemClick(item, 1); });
+ 
+   QHBoxLayout * horizontalLayout = new QHBoxLayout();
+   horizontalLayout->addStretch();
+@@ -101,8 +103,7 @@ void BookmarkDialog::OnAsyncLoadingFileError(std::string const & fileName, bool
+ 
+ void BookmarkDialog::OnItemClick(QTreeWidgetItem * item, int column)
+ {
+-  if (column != 1)
+-    return;
++  if (column != 1) return;
+ 
+   auto const categoryIt = m_categories.find(item);
+   if (categoryIt != m_categories.cend())
+diff --git a/qt/draw_widget.cpp b/qt/draw_widget.cpp
+index 80c37f18bc..fa61ca94ef 100644
+--- a/qt/draw_widget.cpp
++++ b/qt/draw_widget.cpp
+@@ -1,3 +1,4 @@
++// Modified by Korea SOS Atlas Kit, 2026-11-14: Korean usability improvements. Original license retained.
+ #include "qt/draw_widget.hpp"
+ 
+ #include "qt/create_feature_dialog.hpp"
+@@ -268,10 +269,19 @@ void DrawWidget::mousePressEvent(QMouseEvent * e)
+     {
+       SubmitBookmark(pt);
+     }
+-    else if (!m_selectionMode || IsCommandModifier(e))
++    else if (IsCommandModifier(e))
+     {
+       ShowInfoPopup(e, pt);
+     }
++    else if (!m_selectionMode)
++    {
++      place_page::BuildInfo info;
++      info.m_source = place_page::BuildInfo::Source::User;
++      info.m_mercator = m_framework.P3dtoG(pt);
++      info.m_isLongTap = false;
++      info.m_match = place_page::BuildInfo::Match::Nothing;
++      m_framework.BuildAndSetPlacePageInfo(info);
++    }
+     else
+     {
+       m_rubberBandOrigin = e->pos();
+@@ -662,10 +672,22 @@ void DrawWidget::ShowPlacePage()
+ 
+ void DrawWidget::RoutePointFromPlace(RouteMarkType type, m2::PointD const & mercator)
+ {
+-  SetRoutePointAddMode(type);
+-  SubmitRoutingPoint(mercator, true);
+-  if (auto * mw = qobject_cast<MainWindow *>(parent()))
+-    mw->HidePlacePage();
++  // SOS modification: chosen place coordinates must not be overridden by cached debug coordinates.
++  auto & manager = m_framework.GetRoutingManager();
++  RouteMarkData point;
++  point.m_pointType = type;
++  point.m_isMyPosition = false;
++  point.m_position = mercator;
++  auto const & info = m_framework.GetCurrentPlacePageInfo();
++  point.m_title = info.GetTitle();
++  if (!info.GetID().IsValid() && !info.IsBookmark())
++  {
++    auto const ll = mercator::ToLatLon(mercator);
++    point.m_title = QString("%1, %2").arg(ll.m_lat, 0, 'f', 5).arg(ll.m_lon, 0, 'f', 5).toStdString();
++  }
++  manager.AddRoutePoint(std::move(point));
++  if (manager.GetRoutePoints().size() >= 2) manager.BuildRoute();
++  if (auto * mw = qobject_cast<MainWindow *>(parent())) mw->HidePlacePage();
+ }
+ 
+ void DrawWidget::RouteAlongTrack(kml::TrackId trackId)
+diff --git a/qt/mainwindow.cpp b/qt/mainwindow.cpp
+index 7492252594..8c505dfdc4 100644
+--- a/qt/mainwindow.cpp
++++ b/qt/mainwindow.cpp
+@@ -1,4 +1,7 @@
++// Modified by Korea SOS Atlas Kit, 2026-11-14: Korean usability improvements. Original license retained.
+ #include "qt/mainwindow.hpp"
++#include "qt/atlas_ui.hpp"
++#include <QtCore/QDateTime>
+ #include "qt/about.hpp"
+ #include "qt/bookmark_dialog.hpp"
+ #include "qt/draw_widget.hpp"
+@@ -111,6 +114,7 @@ MainWindow::MainWindow(Framework & framework, std::unique_ptr<ScreenshotParams>
+   , m_mapcssFilePath(mapcssFilePath)
+ #endif
+ {
++  InstallAtlasTranslation();
+   setGeometry(screenGeometry);
+ 
+   if (m_screenshotMode)
+@@ -149,7 +153,7 @@ MainWindow::MainWindow(Framework & framework, std::unique_ptr<ScreenshotParams>
+     caption += QString(" - ") + m_mapcssFilePath;
+ #endif
+ 
+-  setWindowTitle(caption);
++  setWindowTitle(caption + tr(" - Korea SOS Atlas Kit modified edition"));
+   setWindowIcon(QIcon(":/ui/logo.png"));
+ 
+ #ifndef OMIM_OS_WINDOWS
+@@ -183,6 +187,10 @@ MainWindow::MainWindow(Framework & framework, std::unique_ptr<ScreenshotParams>
+   }
+ #endif
+ 
++  RoutingSettings::LoadSession(m_pDrawWidget->GetFramework());
++  if (!m_screenshotMode) { CreateAtlasNavigation(); m_Docks[kSearchDock]->show(); }
++
++  // Construct every dock before the OpenGL-backed window is first exposed.
+   // Always show on full screen.
+   showMaximized();
+ 
+@@ -220,7 +228,6 @@ MainWindow::MainWindow(Framework & framework, std::unique_ptr<ScreenshotParams>
+ 
+   m_pDrawWidget->UpdateAfterSettingsChanged();
+ 
+-  RoutingSettings::LoadSession(m_pDrawWidget->GetFramework());
+ }
+ 
+ #if defined(OMIM_OS_WINDOWS)
+@@ -263,7 +270,8 @@ void MainWindow::CreateNavigationBar()
+ {
+   QToolBar * pToolBar = new QToolBar(tr("Navigation Bar"), this);
+   pToolBar->setOrientation(Qt::Vertical);
+-  pToolBar->setIconSize(QSize(32, 32));
++  pToolBar->setIconSize(QSize(24, 24));
++  pToolBar->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+   {
+     m_pDrawWidget->BindHotkeys(*this);
+ 
+@@ -315,7 +323,7 @@ void MainWindow::CreateNavigationBar()
+     pToolBar->addSeparator();
+ 
+     pToolBar->addAction(QIcon(":/navig64/bookmark.png"),
+-                        tr("Show bookmarks and tracks; use ALT + RMB to add a bookmark"), this,
++                        tr("Saved places"), this,
+                         SLOT(OnBookmarksAction()));
+     pToolBar->addSeparator();
+ 
+@@ -337,7 +345,7 @@ void MainWindow::CreateNavigationBar()
+ 
+     QAction * act =
+         pToolBar->addAction(QIcon(":/navig64/routing.png"), tr("Follow route"), this, SLOT(OnFollowRoute()));
+-    act->setToolTip(tr("Build route and use ALT + LMB to emulate current position"));
++    act->setVisible(false); // Simulator action is not part of the end-user navigation flow.
+     pToolBar->addAction(QIcon(":/navig64/clear-route.png"), tr("Clear route"), this, SLOT(OnClearRoute()));
+     pToolBar->addAction(QIcon(":/navig64/settings-routing.png"), tr("Routing settings"), this,
+                         SLOT(OnRoutingSettings()));
+@@ -546,8 +554,13 @@ void MainWindow::OnAbout()
+ 
+ void MainWindow::OnLocationError(location::TLocationError errorCode)
+ {
++  if (errorCode == location::ENoError) return;
++  if (m_atlasGps) m_atlasGps->setText(tr("GPS unavailable. Choose a start manually."));
++  m_atlasHasFix = false;
+   switch (errorCode)
+   {
++  case location::ENotSupported: [[fallthrough]];
++  case location::EGPSIsOff: [[fallthrough]];
+   case location::EDenied: [[fallthrough]];
+   case location::ETimeout: [[fallthrough]];
+   case location::EUnknown:
+@@ -566,6 +579,10 @@ void MainWindow::OnLocationError(location::TLocationError errorCode)
+ 
+ void MainWindow::OnLocationUpdated(location::GpsInfo const & info)
+ {
++  m_atlasFix = info;
++  m_atlasFixTime = static_cast<qint64>(info.m_timestamp);
++  m_atlasHasFix = true;
++  if (m_pMyPositionAction) m_pMyPositionAction->setEnabled(true);
+   m_pDrawWidget->GetFramework().OnLocationUpdate(info);
+ }
+ 
+@@ -823,14 +840,16 @@ void MainWindow::ShowUpdateDialog()
+ 
+ void MainWindow::CreateSearchBarAndPanel()
+ {
+-  CreatePanelImpl(kSearchDock, Qt::RightDockWidgetArea, tr("Search"), QKeySequence(), nullptr);
++  CreatePanelImpl(kSearchDock, Qt::RightDockWidgetArea, tr("Place search"), QKeySequence(), nullptr);
+ 
++  m_Docks[kSearchDock]->setMinimumWidth(320);
++  connect(m_Docks[kSearchDock], &QDockWidget::visibilityChanged, m_pSearchAction, &QAction::setChecked);
+   m_Docks[kSearchDock]->setWidget(new SearchPanel(m_pDrawWidget, m_Docks[kSearchDock]));
+ }
+ 
+ void MainWindow::CreatePlacePagePanel()
+ {
+-  CreatePanelImpl(kPlacePageDock, Qt::LeftDockWidgetArea, tr("Place Page"), QKeySequence(), nullptr);
++  CreatePanelImpl(kPlacePageDock, Qt::RightDockWidgetArea, tr("Place Page"), QKeySequence(), nullptr);
+ 
+   // Deactivate map selection whenever the panel is hidden (X button on dock, action button, etc.).
+   connect(m_Docks[kPlacePageDock], &QDockWidget::visibilityChanged, this, [this](bool visible)
+@@ -850,7 +869,7 @@ void MainWindow::ShowPlacePage(place_page::Info const & info)
+   QWidget * widget = developerMode ? static_cast<QWidget *>(new PlacePageDialogDeveloper(dock, m_pDrawWidget, info))
+                                    : static_cast<QWidget *>(new PlacePageDialogUser(dock, m_pDrawWidget, info));
+ 
+-  std::string title("Place Page");
++  std::string title = tr("Selected place").toStdString();
+   if (info.IsBookmark())
+     title += developerMode ? " (Bookmark)" : " (bookmarked)";
+   else if (info.IsTrack())
+@@ -861,6 +880,7 @@ void MainWindow::ShowPlacePage(place_page::Info const & info)
+   dock->setWidget(widget);
+   dock->show();
+   dock->raise();
++  resizeDocks({m_Docks[kSearchDock], dock}, {height() / 2, height() / 2}, Qt::Vertical);
+ }
+ 
+ void MainWindow::HidePlacePage()
+diff --git a/qt/mainwindow.hpp b/qt/mainwindow.hpp
+index 2c259960ad..f74639b974 100644
+--- a/qt/mainwindow.hpp
++++ b/qt/mainwindow.hpp
+@@ -1,3 +1,4 @@
++// Modified by Korea SOS Atlas Kit, 2026-11-14: Korean usability improvements. Original license retained.
+ #pragma once
+ #include "qt/selection.hpp"
+ 
+@@ -19,6 +20,8 @@ class Framework;
+ class QDockWidget;
+ class QLabel;
+ class QPushButton;
++class QComboBox;
++class QListWidget;
+ 
+ namespace place_page
+ {
+@@ -116,6 +119,17 @@ protected:
+   void CreatePanelImpl(size_t i, Qt::DockWidgetArea area, QString const & name, QKeySequence const & hotkey,
+                        char const * slot);
+   void CreateNavigationBar();
++  void CreateAtlasNavigation();
++  void UpdateAtlasNavigation();
++  QLabel * m_atlasGps = nullptr;
++  QLabel * m_atlasEndpoints = nullptr;
++  QLabel * m_atlasStatus = nullptr;
++  QListWidget * m_atlasSteps = nullptr;
++  QComboBox * m_atlasMode = nullptr;
++  QString m_atlasStepText;
++  location::GpsInfo m_atlasFix;
++  qint64 m_atlasFixTime = 0;
++  bool m_atlasHasFix = false;
+   void CreateSearchBarAndPanel();
+   void CreatePlacePagePanel();
+   void CreateCountryStatusControls();
+diff --git a/qt/place_page_dialog_common.cpp b/qt/place_page_dialog_common.cpp
+index fb1523e184..14d00bc2d1 100644
+--- a/qt/place_page_dialog_common.cpp
++++ b/qt/place_page_dialog_common.cpp
+@@ -1,3 +1,4 @@
++// Modified by Korea SOS Atlas Kit, 2026-11-14: Korean usability improvements. Original license retained.
+ #include "qt/place_page_dialog_common.hpp"
+ 
+ #include "qt/draw_widget.hpp"
+@@ -12,6 +13,9 @@
+ 
+ #include <QtGui/QIcon>
+ #include <QtWidgets/QComboBox>
++#include <QtWidgets/QInputDialog>
++#include <QtWidgets/QLineEdit>
++#include <QtWidgets/QMessageBox>
+ #include <QtWidgets/QFrame>
+ #include <QtWidgets/QGridLayout>
+ #include <QtWidgets/QLabel>
+@@ -47,21 +51,23 @@ QToolBar * createActionToolBar(QWidget * parent, qt::DrawWidget * drawWidget, pl
+ {
+   QToolBar * toolBar = new QToolBar(parent);
+   toolBar->setIconSize(QSize(20, 20));
++  toolBar->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+ 
+   m2::PointD const mercator = info.GetMercator();
+ 
+-  QAction * fromAction = toolBar->addAction(QIcon(":/navig64/point-start.png"), "Route From");
+-  fromAction->setToolTip("Route From");
++  QAction * fromAction = toolBar->addAction(QIcon(":/navig64/point-start.png"), QObject::tr("Start"));
++  fromAction->setToolTip(QObject::tr("Start"));
+   QObject::connect(fromAction, &QAction::triggered, parent,
+                    [drawWidget, mercator] { drawWidget->RoutePointFromPlace(RouteMarkType::Start, mercator); });
+ 
+-  QAction * stopAction = toolBar->addAction(QIcon(":/navig64/point-intermediate.png"), "Add Stop");
+-  stopAction->setToolTip("Add Stop");
++  QAction * stopAction = toolBar->addAction(QIcon(":/navig64/point-intermediate.png"), QObject::tr("Via"));
++  stopAction->setToolTip(QObject::tr("Via"));
++  stopAction->setEnabled(drawWidget->GetFramework().GetRoutingManager().GetRoutePoints().size() >= 2);
+   QObject::connect(stopAction, &QAction::triggered, parent,
+                    [drawWidget, mercator] { drawWidget->RoutePointFromPlace(RouteMarkType::Intermediate, mercator); });
+ 
+-  QAction * toAction = toolBar->addAction(QIcon(":/navig64/point-finish.png"), "Route To");
+-  toAction->setToolTip("Route To");
++  QAction * toAction = toolBar->addAction(QIcon(":/navig64/point-finish.png"), QObject::tr("Destination"));
++  toAction->setToolTip(QObject::tr("Destination"));
+   QObject::connect(toAction, &QAction::triggered, parent,
+                    [drawWidget, mercator] { drawWidget->RoutePointFromPlace(RouteMarkType::Finish, mercator); });
+ 
+@@ -76,11 +82,33 @@ QToolBar * createActionToolBar(QWidget * parent, qt::DrawWidget * drawWidget, pl
+   if (info.ShouldShowEditPlace())
+   {
+     FeatureID const featureId = info.GetID();
+-    QAction * editAction = toolBar->addAction("Edit Place");
++    QAction * editAction = toolBar->addAction(QObject::tr("Edit Place"));
+     QObject::connect(editAction, &QAction::triggered, parent,
+                      [drawWidget, featureId] { drawWidget->EditPlace(featureId); });
+   }
+ 
++  if (!info.IsBookmark())
++  {
++    auto const title = info.GetTitle();
++    auto * save = toolBar->addAction(QObject::tr("Save place"));
++    QObject::connect(save, &QAction::triggered, parent, [parent, drawWidget, mercator, title, save]
++    {
++      bool accepted = false;
++      auto const name = QInputDialog::getText(parent, QObject::tr("Save place"), QObject::tr("Name"), QLineEdit::Normal, QString::fromStdString(title), &accepted).trimmed();
++      if (!accepted || name.isEmpty()) return;
++      auto const note = QInputDialog::getMultiLineText(parent, QObject::tr("Save place"), QObject::tr("Note (optional)"), {}, &accepted);
++      if (!accepted) return;
++      kml::BookmarkData data;
++      data.m_name[kml::kDefaultLangCode] = name.toStdString();
++      data.m_description[kml::kDefaultLangCode] = note.toStdString();
++      data.m_point = mercator;
++      data.m_color.m_predefinedColor = kml::PredefinedColor::Red;
++      auto & bm = drawWidget->GetFramework().GetBookmarkManager();
++      bm.GetEditSession().CreateBookmark(std::move(data), bm.LastEditedBMCategory());
++      save->setText(QObject::tr("Saved"));
++      save->setEnabled(false);
++    });
++  }
+   return toolBar;
+ }
+ 
+diff --git a/qt/place_page_dialog_user.cpp b/qt/place_page_dialog_user.cpp
+index 10bdc2a729..b70e23a3ec 100644
+--- a/qt/place_page_dialog_user.cpp
++++ b/qt/place_page_dialog_user.cpp
+@@ -1,3 +1,4 @@
++// Modified by Korea SOS Atlas Kit, 2026-11-14: display saved notes. Original license retained.
+ #include "qt/place_page_dialog_user.hpp"
+ 
+ #include "qt/qt_common/text_dialog.hpp"
+@@ -64,7 +65,7 @@ PlacePageDialogUser::PlacePageDialogUser(QWidget * parent, qt::DrawWidget * draw
+ 
+     if (!title.empty())
+     {
+-      QLabel * titleLabel = new QLabel(QString::fromStdString("<h1>" + title + "</h1>"));
++      QLabel * titleLabel = new QLabel(QString("<h1>%1</h1>").arg(QString::fromStdString(title).toHtmlEscaped()));
+       titleLabel->setWordWrap(true);
+       header->addWidget(titleLabel);
+     }
+@@ -94,7 +95,19 @@ PlacePageDialogUser::PlacePageDialogUser(QWidget * parent, qt::DrawWidget * draw
+     int row = 0;
+ 
+     if (info.IsBookmark())
+-      addEntry(data, row, "Bookmark", "Yes");
++    {
++      addEntry(data, row, QObject::tr("Bookmark").toStdString(), QObject::tr("Yes").toStdString());
++      auto const note = kml::GetDefaultStr(info.GetBookmarkData().m_description);
++      if (!note.empty())
++      {
++        data->addWidget(new QLabel(QObject::tr("Note")), row, 0);
++        auto * noteLabel = new QLabel(QString::fromStdString(note));
++        noteLabel->setTextFormat(Qt::PlainText);
++        noteLabel->setWordWrap(true);
++        noteLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
++        data->addWidget(noteLabel, row++, 1);
++      }
++    }
+ 
+     // Wikipedia fragment
+     if (auto const & wikipedia = info.GetMetadata(feature::Metadata::EType::FMD_WIKIPEDIA); !wikipedia.empty())
+diff --git a/qt/res/resources.qrc b/qt/res/resources.qrc
+index fcba6ad092..4e96512f79 100644
+--- a/qt/res/resources.qrc
++++ b/qt/res/resources.qrc
+@@ -1,4 +1,6 @@
++<!-- Modified by Korea SOS Atlas Kit, 2026-11-14. Original Apache-2.0 license retained. -->
+ <RCC>
++    <qresource prefix="/atlas"><file alias="ko.json">../atlas_ko.json</file></qresource>
+     <qresource prefix="/navig64">
+         <file>search.png</file>
+         <file>up.png</file>
+diff --git a/qt/search_panel.cpp b/qt/search_panel.cpp
+index 65eff2ceb7..de78ab71e0 100644
+--- a/qt/search_panel.cpp
++++ b/qt/search_panel.cpp
+@@ -1,3 +1,4 @@
++// Modified by Korea SOS Atlas Kit, 2026-11-14: Korean usability improvements. Original license retained.
+ #include "qt/search_panel.hpp"
+ #include "qt/draw_widget.hpp"
+ 
+@@ -9,6 +10,7 @@
+ #include "base/assert.hpp"
+ 
+ #include <QtCore/QTimer>
++#include <QtCore/QLocale>
+ #include <QtGui/QGuiApplication>
+ #include <QtWidgets/QButtonGroup>
+ #include <QtWidgets/QCheckBox>
+@@ -33,6 +35,9 @@ SearchPanel::SearchPanel(DrawWidget * drawWidget, QWidget * parent)
+   , m_timestamp(0)
+ {
+   m_pEditor = new QLineEdit(this);
++  m_pEditor->setPlaceholderText(tr("Place or address (e.g. Seoul Station)"));
++  m_pEditor->setClearButtonEnabled(true);
++  m_pEditor->setObjectName("atlasPlaceSearch");
+   connect(m_pEditor, &QLineEdit::textChanged, this, &SearchPanel::OnSearchTextChanged);
+ 
+   m_pTable = new QTableWidget(0, 4 /*columns*/, this);
+@@ -43,6 +48,9 @@ SearchPanel::SearchPanel(DrawWidget * drawWidget, QWidget * parent)
+   m_pTable->verticalHeader()->setVisible(false);
+   m_pTable->horizontalHeader()->setVisible(false);
+   m_pTable->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
++  m_pTable->setColumnHidden(0, true);
++  m_pTable->setColumnHidden(3, true);
++  m_pTable->setMinimumWidth(280);
+ 
+   connect(m_pTable, &QTableWidget::cellClicked, this, &SearchPanel::OnSearchPanelItemClicked);
+ 
+@@ -61,6 +69,7 @@ SearchPanel::SearchPanel(DrawWidget * drawWidget, QWidget * parent)
+   searchModeButtons->addButton(buttonE, static_cast<int>(search::Mode::Everywhere));
+   QRadioButton * buttonV = new QRadioButton(tr("Viewport"));
+   modeLayout->addWidget(buttonV);
++  buttonV->hide(); // Current viewport mode has no result list; keep the clear default flow.
+   searchModeButtons->addButton(buttonV, static_cast<int>(search::Mode::Viewport));
+   groupBox->setLayout(modeLayout);
+   groupBox->setFlat(true);
+@@ -69,6 +78,7 @@ SearchPanel::SearchPanel(DrawWidget * drawWidget, QWidget * parent)
+ 
+   m_isCategory = new QCheckBox(tr("Category request"));
+   m_isCategory->setCheckState(Qt::Unchecked);
++  m_isCategory->setVisible(false);
+   connect(m_isCategory, &QCheckBox::stateChanged, std::bind(&SearchPanel::RunSearch, this));
+ 
+   QHBoxLayout * requestLayout = new QHBoxLayout();
+@@ -76,8 +86,12 @@ SearchPanel::SearchPanel(DrawWidget * drawWidget, QWidget * parent)
+   requestLayout->addWidget(m_pClearButton);
+   QVBoxLayout * verticalLayout = new QVBoxLayout();
+   verticalLayout->addWidget(groupBox);
++  verticalLayout->addWidget(new QLabel(tr("Korean/English: Ctrl+Space (2-set keyboard)"), this));
+   verticalLayout->addWidget(m_isCategory);
+   verticalLayout->addLayout(requestLayout);
++  m_resultsStatus = new QLabel(tr("Type a place, then select a result."), this);
++  m_resultsStatus->setWordWrap(true);
++  verticalLayout->addWidget(m_resultsStatus);
+   verticalLayout->addWidget(m_pTable);
+   setLayout(verticalLayout);
+ }
+@@ -172,7 +186,10 @@ void SearchPanel::OnEverywhereSearchResults(uint64_t timestamp, search::Results
+   GetFramework().FillSearchResultsMarks(true /* clear */, m_results);
+ 
+   if (m_results.IsEndMarker())
++  {
+     StopBusyIndicator();
++    m_resultsStatus->setText(m_results.GetCount() == 0 ? tr("No results in installed maps. Try a nearby place or shorter name.") : tr("%1 results · Select one to set start/destination or save.").arg(m_results.GetCount()));
++  }
+ }
+ 
+ bool SearchPanel::Try3dModeCmd(std::string const & str)
+@@ -211,7 +228,7 @@ std::string SearchPanel::GetCurrentInputLocale()
+   // Hardcode search input language.
+   // return "de";
+ 
+-  QString loc = QGuiApplication::inputMethod()->locale().name();
++  QString loc = QLocale().name();
+   loc.replace('_', '-');
+   auto res = loc.toStdString();
+   if (CategoriesHolder::MapLocaleToInteger(res) < 0)
+@@ -235,6 +252,9 @@ void SearchPanel::OnSearchTextChanged(QString const & str)
+ 
+   if (normalized.empty())
+   {
++    ++m_timestamp;
++    StopBusyIndicator();
++    m_resultsStatus->setText(tr("Type a place, then select a result."));
+     GetFramework().GetSearchAPI().CancelAllSearches();
+ 
+     // hide X button
+diff --git a/qt/search_panel.hpp b/qt/search_panel.hpp
+index 6878ce9fa5..00039c1f8d 100644
+--- a/qt/search_panel.hpp
++++ b/qt/search_panel.hpp
+@@ -1,3 +1,4 @@
++// Modified by Korea SOS Atlas Kit, 2026-11-14. Original Apache-2.0 license retained.
+ #pragma once
+ 
+ #include "search/mode.hpp"
+@@ -11,6 +12,7 @@
+ 
+ class QCheckBox;
+ class QLineEdit;
++class QLabel;
+ class QPushButton;
+ class QTableWidget;
+ class QTimer;
+@@ -26,6 +28,7 @@ class SearchPanel : public QWidget
+   DrawWidget * m_pDrawWidget;
+   QTableWidget * m_pTable;
+   QLineEdit * m_pEditor;
++  QLabel * m_resultsStatus;
+   QPushButton * m_pClearButton;
+   QTimer * m_pAnimationTimer;
+   QCheckBox * m_isCategory;

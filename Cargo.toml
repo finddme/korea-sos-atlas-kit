@@ -1,0 +1,32 @@
+[package]
+name = "korea-sos-atlas-kit"
+license = "AGPL-3.0-only"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[features]
+dev-tools = []
+
+[dependencies]
+ratatui = "=0.29.0"
+crossterm = "=0.28.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+unicode-width = "0.2"
+unicode-casefold = "0.2"
+shell-words = "1"
+base64 = "0.22"
+percent-encoding = "2"
+
+libc = "0.2"
+
+[profile.release]
+strip = true
+
+# Development-only terminal tests live with the local data under dev/ (not
+# published). A clone without dev/ still builds; only `cargo test` needs it.
+[[test]]
+name = "terminal"
+path = "dev/tests/terminal.rs"

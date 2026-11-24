@@ -1,0 +1,52 @@
+{
+  "upstream": "https://github.com/pleasereadthisforme/pleasereadthisforme",
+  "observed_head": "05b5e51ac4944f9927f8aefc84bc339ab3cdb4a8",
+  "date": "2026-11-14",
+  "note": "Actual working-file hashes; not assumed identical to HEAD. No automatic sync.",
+  "inputs": [
+    {
+      "source": "sidecar/src/prtfm/query/command_io.py",
+      "sha256": "8fe3e7c66697d38c0c27a86b70f9882fdc8d945abaf6e2b6d36c0d90b020ea17"
+    },
+    {
+      "source": "sidecar/src/prtfm/query/command_paths.py",
+      "sha256": "21e706ce5e2943f5419b4720eb5ac6135917c03c296d4b3ee58e73dc18f05fba"
+    },
+    {
+      "source": "sidecar/src/prtfm/query/file_commands.py",
+      "sha256": "367f9e9314967b60c4eaebec3bba55a7daae0af118f495fb3aca215b66ad8235"
+    },
+    {
+      "source": "sidecar/src/prtfm/query/document_agent.py",
+      "sha256": "01bd75344792d69c276850743a8ee16112743ce6ef17c6dc3b8e4f9f0a4322b8"
+    },
+    {
+      "source": "sidecar/src/prtfm/query/source_snapshot.py",
+      "sha256": "6ed1deab3d27d5fa7f6e46bbcef76567bb3ecc1560adf51b539c81d8b3034e45"
+    },
+    {
+      "source": "sidecar/src/prtfm/query/sources.py",
+      "sha256": "cc34d496df77e3370bbfc50675a4653659de83a268b47d85a5d1fca0c626a938"
+    },
+    {
+      "source": "sidecar/src/prtfm/query/agent.py",
+      "sha256": "6294b2eefbaa99d74949c98d0bc91884e6c7f79356f029acbe3b0f9fd2344d9a"
+    },
+    {
+      "source": "sidecar/src/prtfm/llm/openai_client.py",
+      "sha256": "721f1c183b2bcbb2acd76d11f53216fecf72d4f79d3237288843198a339ac2d5"
+    },
+    {
+      "source": "sidecar/src/prtfm/llm/usage.py",
+      "sha256": "e7e7e576fd29381e1b285f8c9ecd8e15908420815c22a59ff843b1a04f873812"
+    },
+    {
+      "source": "sidecar/src/prtfm/query/tools.py",
+      "sha256": "d12c8c93920f2d84631033b9188ae1f6efcd624acb3962f52172a1590cbb9ec9"
+    },
+    {
+      "source": "LICENSE",
+      "sha256": "d8a6cc31abc16b6748c7a21f21611f5a1ec33f67d22ca23d7da1c19b95496bee"
+    }
+  ]
+}

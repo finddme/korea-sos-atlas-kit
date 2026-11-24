@@ -1,0 +1,14 @@
+# Allowlist: only what people use or need to build the released app is
+# published. Everything for development (research, plans, PoC output, dev
+# scripts, tests, tools, local data, models, engines) lives in dev/ and bak/.
+/*
+!/.gitignore
+!/README.md
+!/LICENSING.md
+!/LICENSES/
+!/attribution/
+!/Cargo.toml
+!/Cargo.lock
+!/build.sh
+!/src/
+!/integrations/
