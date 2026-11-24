@@ -108,7 +108,8 @@ jobs:
 
       - name: Compile
         working-directory: om
-        run: cmake --build build --target desktop
+        # -k 0: report every compile error in one run.
+        run: cmake --build build --target desktop -- -k 0
 
       - name: Stage runtime
         working-directory: om
