@@ -36,6 +36,10 @@ jobs:
       run:
         shell: bash
     steps:
+      # Keep LF endings: the patch is LF and would not apply to CRLF checkouts.
+      - name: Disable line ending conversion
+        run: git config --global core.autocrlf false
+
       - name: Checkout kit sources
         uses: actions/checkout@v6
         with:
