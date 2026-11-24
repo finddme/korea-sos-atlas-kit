@@ -1,0 +1,151 @@
+# Builds the Korea SOS Atlas Kit edition of the Organic Maps desktop viewer
+# for Windows x64 and publishes it as a workflow artifact.
+#
+# Base: Organic Maps release 2026.11.11-39 (the first release line with
+# upstream Windows support), plus integrations/organicmaps/
+# desktop-usability-2026.11.patch. The steps mirror upstream's own Windows CI
+# (.github/workflows/build-cmake.yaml at that commit) and its "direct"
+# distribution staging (tools/windows/stage_runtime.py). Upstream stages Qt
+# without the compiler runtime, so the Visual C++ runtime DLLs are added
+# app-locally here: the result runs on a fresh Windows 10/11 without installs.
+name: Organic Maps (Windows)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - integrations/organicmaps/desktop-usability-2026.11.patch
+      - .github/workflows/organicmaps-windows.yml
+
+permissions:
+  contents: read
+
+env:
+  OM_REPOSITORY: organicmaps/organicmaps
+  OM_COMMIT: 5c0c5ec0a706b9bea17b4d5b0b40e7b60f916a13 # tag 2026.11.11-39-android
+  WINDOWS_QT_VERSION: '6.8.3'
+  WINDOWS_QT_ARCH: msvc2022_64
+  WINDOWS_QT_MODULES: qtpositioning
+
+jobs:
+  build:
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 240
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout kit sources
+        uses: actions/checkout@v6
+        with:
+          path: kit
+
+      - name: Checkout Organic Maps
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.OM_REPOSITORY }}
+          ref: ${{ env.OM_COMMIT }}
+          path: om
+          # tools/unix/version.sh counts commits in a 128-commit window.
+          fetch-depth: 128
+
+      - name: Submodules
+        working-directory: om
+        run: git submodule update --depth 1 --init --recursive --jobs=20
+
+      - name: Apply kit patch
+        working-directory: om
+        run: |
+          test "$(git rev-parse HEAD)" = "$OM_COMMIT"
+          git apply --check ../kit/integrations/organicmaps/desktop-usability-2026.11.patch
+          git apply ../kit/integrations/organicmaps/desktop-usability-2026.11.patch
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          dir: ${{ runner.temp }}
+          version: ${{ env.WINDOWS_QT_VERSION }}
+          arch: win64_${{ env.WINDOWS_QT_ARCH }}
+          modules: ${{ env.WINDOWS_QT_MODULES }}
+          cache: true
+          set-env: false
+
+      - name: Configure Qt
+        run: |
+          qt_root="$(cygpath -m "$RUNNER_TEMP")/Qt/$WINDOWS_QT_VERSION/$WINDOWS_QT_ARCH"
+          test -f "$qt_root/bin/qmake.exe"
+          echo "$qt_root/bin" >> "$GITHUB_PATH"
+          echo "QT_PATH=$qt_root" >> "$GITHUB_ENV"
+
+      - name: Set up MSVC environment
+        uses: TheMrMilchmann/setup-msvc-dev@v4.1.0
+        with:
+          arch: x64
+
+      - name: Configure ccache
+        uses: hendrikmuhs/ccache-action@v1.2.24
+        with:
+          key: kit-organicmaps-windows-${{ env.OM_COMMIT }}
+          max-size: 2G
+
+      - name: Configure
+        working-directory: om
+        env:
+          CC: cl.exe
+          CXX: cl.exe
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+        run: |
+          cmake --preset ci-windows \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOMIM_WINDOWS_DISTRIBUTION=direct \
+            -DBUILD_TESTING=OFF
+
+      - name: Compile
+        working-directory: om
+        run: cmake --build build --target desktop
+
+      - name: Stage runtime
+        working-directory: om
+        run: |
+          stage="$GITHUB_WORKSPACE/stage"
+          cmake --install build --component WindowsRuntime --config Release --prefix "$stage"
+          test -f "$stage/OrganicMaps.exe"
+
+      - name: Add Visual C++ runtime (app-local)
+        run: |
+          stage="$GITHUB_WORKSPACE/stage"
+          redist="$(cygpath -u "$VCToolsRedistDir")"
+          crt=$(ls -d "$redist"/x64/Microsoft.VC*.CRT | head -1)
+          test -n "$crt"
+          cp -v "$crt"/*.dll "$stage/"
+          echo "$crt" > "$stage/licenses/VC-RUNTIME-SOURCE.txt"
+
+      - name: Add kit modification notice
+        run: |
+          stage="$GITHUB_WORKSPACE/stage"
+          notice="$stage/licenses/korea-sos-atlas-kit"
+          mkdir -p "$notice"
+          cp kit/integrations/organicmaps/desktop-usability-2026.11.patch "$notice/"
+          cp kit/integrations/organicmaps/LICENSE kit/integrations/organicmaps/NOTICE "$notice/"
+          cat > "$notice/README.txt" <<EOF
+          Organic Maps desktop viewer, Korea SOS Atlas Kit modified edition.
+          Upstream: https://github.com/$OM_REPOSITORY at $OM_COMMIT (2026.11.11-39).
+          Modifications: desktop-usability-2026.11.patch in this folder (Apache-2.0).
+          Built by: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+          Kit source commit: $GITHUB_SHA
+          Map data is not included; it is subject to the Organic Maps Binary Data License.
+          EOF
+
+      - name: Checksums
+        working-directory: stage
+        run: find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: organicmaps-windows-x64
+          path: stage
+          retention-days: 30
+          if-no-files-found: error
