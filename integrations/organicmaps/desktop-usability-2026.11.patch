@@ -1,3 +1,61 @@
+diff --git a/libs/platform/atlas_offline.hpp b/libs/platform/atlas_offline.hpp
+new file mode 100644
+index 0000000000..b58925669d
+--- /dev/null
++++ b/libs/platform/atlas_offline.hpp
+@@ -0,0 +1,20 @@
++// Korea SOS Atlas Kit modification, 2026-11-25. Apache-2.0; upstream notices retained.
++#pragma once
++#include <cstdlib>
++#include <cstring>
++
++namespace platform
++{
++// The kit launches the viewer with SOS_ATLAS_OFFLINE=1. The viewer then makes no
++// network requests at all: map downloads, update checks, server pings and edit
++// uploads fail before any socket is opened, and the download UI is hidden.
++inline bool AtlasOffline()
++{
++  static bool const offline = []
++  {
++    char const * v = std::getenv("SOS_ATLAS_OFFLINE");
++    return v != nullptr && std::strcmp(v, "1") == 0;
++  }();
++  return offline;
++}
++}  // namespace platform
+diff --git a/libs/platform/http_client_qt.cpp b/libs/platform/http_client_qt.cpp
+index 627ae2595f..684d486fb7 100644
+--- a/libs/platform/http_client_qt.cpp
++++ b/libs/platform/http_client_qt.cpp
+@@ -1,5 +1,7 @@
+ #include "platform/http_client_qt.hpp"
+ 
++#include "platform/atlas_offline.hpp"
++
+ #include "base/logging.hpp"
+ 
+ #include <QBuffer>
+@@ -528,6 +530,19 @@ HttpClient::RequestHandle HttpClient::RunHttpRequestAsync(CompletionHandler hand
+   RequestHandle handle;
+   handle.m_impl = std::make_shared<RequestHandle::Impl>();
+ 
++  // Korea SOS Atlas Kit offline mode: fail like an unreachable network, before any socket.
++  if (AtlasOffline())
++  {
++    LOG(LINFO, ("Offline mode: network request refused:", m_urlRequested));
++    if (handler)
++    {
++      Result result;
++      result.m_errorCode = static_cast<int>(QNetworkReply::NetworkSessionFailedError);
++      handler(std::move(result));
++    }
++    return handle;
++  }
++
+   QNetworkRequest request(QUrl(QString::fromStdString(m_urlRequested)));
+ 
+   // TODO(klahr): Keep only setTransferTimeout() when Qt 5 is dropped.
 diff --git a/libs/platform/platform_win.cpp b/libs/platform/platform_win.cpp
 index 1ce5c486d9..7f6728f9de 100644
 --- a/libs/platform/platform_win.cpp
@@ -65,10 +123,10 @@ index 748fd0bbb4..476786e769 100644
  
 diff --git a/qt/atlas_ko.json b/qt/atlas_ko.json
 new file mode 100644
-index 0000000000..c043fa841a
+index 0000000000..51fa736e95
 --- /dev/null
 +++ b/qt/atlas_ko.json
-@@ -0,0 +1,188 @@
+@@ -0,0 +1,189 @@
 +{
 +  "Route and location": "경로 · 현재 위치",
 +  "GPS: no position received": "GPS 위치 미수신 · 수동 출발지 선택 가능",
@@ -255,7 +313,8 @@ index 0000000000..c043fa841a
 +  "km": "km",
 +  "m": "m",
 +  "category_atm": "ATM",
-+  "apartment_numbers": "세대 번호"
++  "apartment_numbers": "세대 번호",
++  "%1: this map is not included in the offline kit.": "%1: 이 지역 지도는 오프라인 키트에 들어 있지 않습니다."
 +}
 diff --git a/qt/atlas_location.hpp b/qt/atlas_location.hpp
 new file mode 100644
@@ -621,8 +680,22 @@ index 385b445eae..46853a9aaf 100644
  }
  
  void DrawWidget::RouteAlongTrack(kml::TrackId trackId)
+diff --git a/qt/main.cpp b/qt/main.cpp
+index 499cb5bd19..64f04d776c 100644
+--- a/qt/main.cpp
++++ b/qt/main.cpp
+@@ -89,7 +89,8 @@ bool const g_logAbortLevelDummy = gflags::RegisterFlagValidator(&FLAGS_log_abort
+ #ifdef OMIM_OS_WINDOWS
+ void InitializeWindowsLogging(Platform const & platform)
+ {
+-  QDir const logDir(QString::fromStdString(platform.WritablePathForFile("logs")));
++  // Kit: logs go to the portable settings folder, not into the (read-only) map data folder.
++  QDir const logDir(QString::fromStdString(platform.SettingsPathForFile("logs")));
+   if (!QDir().mkpath(logDir.path()))
+     return;
+ 
 diff --git a/qt/mainwindow.cpp b/qt/mainwindow.cpp
-index e027743149..5ce54be718 100644
+index e027743149..be050061f9 100644
 --- a/qt/mainwindow.cpp
 +++ b/qt/mainwindow.cpp
 @@ -1,4 +1,7 @@
@@ -633,7 +706,15 @@ index e027743149..5ce54be718 100644
  #include "qt/about.hpp"
  #include "qt/bookmark_dialog.hpp"
  #include "qt/draw_widget.hpp"
-@@ -94,6 +97,7 @@ MainWindow::MainWindow(Framework & framework, std::unique_ptr<ScreenshotParams>
+@@ -18,6 +21,7 @@
+ #include "map/framework.hpp"
+ #include "map/place_page_info.hpp"
+ 
++#include "platform/atlas_offline.hpp"
+ #include "platform/platform.hpp"
+ #include "platform/settings.hpp"
+ 
+@@ -94,6 +98,7 @@ MainWindow::MainWindow(Framework & framework, std::unique_ptr<ScreenshotParams>
    , m_mapcssFilePath(mapcssFilePath)
  #endif
  {
@@ -641,7 +722,7 @@ index e027743149..5ce54be718 100644
    setGeometry(screenGeometry);
  
    if (m_screenshotMode)
-@@ -132,7 +136,7 @@ MainWindow::MainWindow(Framework & framework, std::unique_ptr<ScreenshotParams>
+@@ -132,7 +137,7 @@ MainWindow::MainWindow(Framework & framework, std::unique_ptr<ScreenshotParams>
      caption += QString(" - ") + m_mapcssFilePath;
  #endif
  
@@ -650,7 +731,7 @@ index e027743149..5ce54be718 100644
    setWindowIcon(QIcon(":/ui/logo.png"));
  
  #ifndef OMIM_OS_WINDOWS
-@@ -168,6 +172,10 @@ MainWindow::MainWindow(Framework & framework, std::unique_ptr<ScreenshotParams>
+@@ -168,6 +173,10 @@ MainWindow::MainWindow(Framework & framework, std::unique_ptr<ScreenshotParams>
    }
  #endif
  
@@ -661,7 +742,17 @@ index e027743149..5ce54be718 100644
    // Always show on full screen.
    showMaximized();
  
-@@ -205,7 +213,6 @@ MainWindow::MainWindow(Framework & framework, std::unique_ptr<ScreenshotParams>
+@@ -176,6 +185,9 @@ MainWindow::MainWindow(Framework & framework, std::unique_ptr<ScreenshotParams>
+   bool bShow = true;
+   std::string const showWelcome = "ShowWelcome";
+   settings::TryGet(showWelcome, bShow);
++  // Offline kit: the welcome dialog only leads to the map downloader.
++  if (platform::AtlasOffline())
++    bShow = false;
+ 
+   if (bShow)
+   {
+@@ -205,7 +217,6 @@ MainWindow::MainWindow(Framework & framework, std::unique_ptr<ScreenshotParams>
  
    m_pDrawWidget->UpdateAfterSettingsChanged();
  
@@ -669,7 +760,7 @@ index e027743149..5ce54be718 100644
  }
  
  #if defined(OMIM_OS_WINDOWS)
-@@ -248,7 +255,8 @@ void MainWindow::CreateNavigationBar()
+@@ -248,7 +259,8 @@ void MainWindow::CreateNavigationBar()
  {
    QToolBar * pToolBar = new QToolBar(Tr("prefs_group_route"), this);
    pToolBar->setOrientation(Qt::Vertical);
@@ -679,7 +770,7 @@ index e027743149..5ce54be718 100644
    {
      m_pDrawWidget->BindHotkeys(*this);
  
-@@ -322,6 +330,7 @@ void MainWindow::CreateNavigationBar()
+@@ -322,6 +334,7 @@ void MainWindow::CreateNavigationBar()
      QAction * act =
          pToolBar->addAction(QIcon(":/navig64/routing.png"), Tr("follow_route"), this, SLOT(OnFollowRoute()));
      act->setToolTip(Tr("follow_route_mouse_shortcut_tooltip"));
@@ -687,7 +778,36 @@ index e027743149..5ce54be718 100644
      pToolBar->addAction(QIcon(":/navig64/clear-route.png"), Tr("clear_route"), this, SLOT(OnClearRoute()));
      pToolBar->addAction(QIcon(":/navig64/settings-routing.png"), Tr("routing_settings"), this,
                          SLOT(OnRoutingSettings()));
-@@ -536,6 +545,9 @@ void MainWindow::OnLocationError(location::TLocationError errorCode)
+@@ -425,8 +438,11 @@ void MainWindow::CreateNavigationBar()
+   qt::common::ScaleSlider::Embed(Qt::Vertical, *pToolBar, *m_pDrawWidget);
+ 
+ #ifndef NO_DOWNLOADER
+-  pToolBar->addSeparator();
+-  pToolBar->addAction(QIcon(":/navig64/download.png"), Tr("download_maps"), this, SLOT(ShowUpdateDialog()));
++  if (!platform::AtlasOffline())
++  {
++    pToolBar->addSeparator();
++    pToolBar->addAction(QIcon(":/navig64/download.png"), Tr("download_maps"), this, SLOT(ShowUpdateDialog()));
++  }
+ #endif  // NO_DOWNLOADER
+ 
+   if (m_screenshotMode)
+@@ -478,6 +494,14 @@ void MainWindow::CreateCountryStatusControls()
+     auto const status = attrs.m_status;
+     auto const countryName = QString::fromStdString(storage.GetNodeLocalName(countryId));
+ 
++    if (platform::AtlasOffline())
++    {
++      // No download or retry buttons: the kit ships its maps and never downloads.
++      m_downloadingStatusLabel->setText(tr("%1: this map is not included in the offline kit.").arg(countryName));
++      m_downloadingStatusLabel->setVisible(true);
++      return;
++    }
++
+     if (status == storage::NodeStatus::NotDownloaded)
+     {
+       m_downloadButton->setVisible(true);
+@@ -536,6 +560,9 @@ void MainWindow::OnLocationError(location::TLocationError errorCode)
  {
    ASSERT_NOT_EQUAL(errorCode, location::ENoError, ());
    LOG(LWARNING, ("Location error:", errorCode));
@@ -697,7 +817,7 @@ index e027743149..5ce54be718 100644
  
    // Keep "My position" enabled so the user can retry after fixing the cause.
    if (m_pDrawWidget != nullptr)
-@@ -544,6 +556,10 @@ void MainWindow::OnLocationError(location::TLocationError errorCode)
+@@ -544,6 +571,10 @@ void MainWindow::OnLocationError(location::TLocationError errorCode)
  
  void MainWindow::OnLocationUpdated(location::GpsInfo const & info)
  {
@@ -708,7 +828,7 @@ index e027743149..5ce54be718 100644
    m_pDrawWidget->GetFramework().OnLocationUpdate(info);
  }
  
-@@ -802,12 +818,14 @@ void MainWindow::CreateSearchBarAndPanel()
+@@ -802,12 +833,14 @@ void MainWindow::CreateSearchBarAndPanel()
  {
    CreatePanelImpl(kSearchDock, Qt::RightDockWidgetArea, Tr("search"), QKeySequence(), nullptr);
  
@@ -724,7 +844,7 @@ index e027743149..5ce54be718 100644
  
    // Deactivate map selection whenever the panel is hidden (X button on dock, action button, etc.).
    connect(m_Docks[kPlacePageDock], &QDockWidget::visibilityChanged, this, [this](bool visible)
-@@ -838,6 +856,7 @@ void MainWindow::ShowPlacePage(place_page::Info const & info)
+@@ -838,6 +871,7 @@ void MainWindow::ShowPlacePage(place_page::Info const & info)
    dock->setWidget(widget);
    dock->show();
    dock->raise();

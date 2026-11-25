@@ -274,29 +274,73 @@ fn windows_command(root: &Path, dir: &Path) -> Result<(Command, PathBuf), Error>
         "SOS_ATLAS_SETTINGS_DIR",
         crate::layout::plain(state.join("settings")),
     )
+    // No network at all: downloads, update checks and uploads are refused inside
+    // the viewer and the download UI is hidden (patch: libs/platform/atlas_offline.hpp).
+    .env("SOS_ATLAS_OFFLINE", "1")
     .stdin(Stdio::null())
     .stdout(output.try_clone()?)
     .stderr(output);
     Ok((cmd, log))
 }
 
+/// Windows: once the viewer has crashed at start-up (no usable graphics driver or
+/// a too-old OpenGL), later launches render on the CPU with Qt's bundled
+/// opengl32sw.dll. Deleting this file retries the graphics card.
+const SOFTWARE_GL_MARKER: &str = "opengl-software";
+/// An abnormal exit within this time counts as a start-up crash.
+const STARTUP_CRASH_WINDOW: Duration = Duration::from_secs(20);
+
+fn spawn_viewer(root: &Path, software: bool) -> Result<(std::process::Child, PathBuf), Error> {
+    let (mut cmd, log) = command(root)?;
+    if software {
+        cmd.env("QT_OPENGL", "software");
+    }
+    Ok((cmd.spawn()?, log))
+}
+
 pub(super) fn launch(root: &Path) -> String {
     if RUNNING.swap(true, Ordering::SeqCst) {
         return "Organic Maps is already open".into();
     }
-    match (|| -> Result<PathBuf, Box<dyn std::error::Error>> {
-        let (mut cmd, log) = command(root)?;
-        let mut child = cmd.spawn()?;
+    let marker = state_dir(root).ok().map(|d| d.join(SOFTWARE_GL_MARKER));
+    let can_fall_back = cfg!(windows) && marker.is_some();
+    let mut software = can_fall_back && marker.as_ref().is_some_and(|m| m.is_file());
+    let remember_software = |marker: &Option<PathBuf>| {
+        if let Some(m) = marker {
+            let _ = fs::write(m, "The map viewer crashed at start-up; it now renders on the CPU.\n");
+        }
+    };
+    match (|| -> Result<PathBuf, Error> {
+        let (mut child, mut log) = spawn_viewer(root, software)?;
+        let started = std::time::Instant::now();
         thread::sleep(Duration::from_millis(300));
         if let Some(status) = child.try_wait()? {
-            return Err(format!("Viewer exited ({status}); see {}", log.display()).into());
+            if status.success() || !can_fall_back || software {
+                return Err(format!("Viewer exited ({status}); see {}", log.display()).into());
+            }
+            software = true;
+            remember_software(&marker);
+            (child, log) = spawn_viewer(root, true)?;
         }
+        let root = root.to_path_buf();
+        let retry = can_fall_back && !software;
         thread::spawn(move || {
-            let _ = child.wait();
+            let crashed_early = child
+                .wait()
+                .is_ok_and(|s| !s.success() && started.elapsed() < STARTUP_CRASH_WINDOW);
+            if retry && crashed_early {
+                remember_software(&marker);
+                if let Ok((mut c, _)) = spawn_viewer(&root, true) {
+                    let _ = c.wait();
+                }
+            }
             RUNNING.store(false, Ordering::SeqCst);
         });
         Ok(log)
     })() {
+        Ok(_) if software => {
+            "Organic Maps opened · Offline · CPU rendering (no usable graphics driver)".into()
+        }
         Ok(_) => "Organic Maps opened · Offline · Close its window to release memory".into(),
         Err(e) => {
             RUNNING.store(false, Ordering::SeqCst);
@@ -401,6 +445,9 @@ mod tests {
             .collect();
         assert!(envs.contains(&"SOS_ATLAS_REQUEST".to_owned()));
         assert!(envs.contains(&"SOS_ATLAS_SETTINGS_DIR".to_owned()));
+        assert!(cmd
+            .get_envs()
+            .any(|(k, v)| k == "SOS_ATLAS_OFFLINE" && v == Some("1".as_ref())));
     }
     #[test]
     #[cfg(not(any(target_os = "linux", windows)))]
