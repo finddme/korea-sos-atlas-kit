@@ -716,19 +716,27 @@ fn status_sections(content: &Path, docs: &[Doc], engine: &ai_runtime::Controller
                 }
             )));
         }
-        ai.push(Text(format!(
-            "상태: {}",
-            match engine.status.phase.as_str() {
-                "" | "OFF" => "꺼짐",
-                "READY" => "켜짐 (질문할 수 있음)",
-                "STARTING" => "켜는 중",
-                "SEARCHING" | "ANSWERING" => "답변 중",
-                "CONFIRM_MEMORY" => "메모리 부족 확인을 기다리는 중 (AI 칸)",
-                "STOPPING" => "끄는 중",
-                "ERROR" => "오류 (AI 칸의 안내 확인)",
-                other => other,
-            }
-        )));
+        // Explain the state here too: the low-memory question and refusals are
+        // otherwise only visible in the AI pane.
+        let phase = engine.status.phase.as_str();
+        let detail = engine.status.text.replace('\n', " ");
+        // The question's own key hint is shown as buttons below.
+        let detail = detail
+            .split("[Enter")
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_owned();
+        ai.push(Text(match phase {
+            "" | "OFF" => "상태: 꺼짐".into(),
+            "READY" => "상태: 켜짐 (질문할 수 있음)".into(),
+            "STARTING" => "상태: 켜는 중".into(),
+            "SEARCHING" | "ANSWERING" => "상태: 답변 중".into(),
+            "STOPPING" => "상태: 끄는 중".into(),
+            "CONFIRM_MEMORY" => format!("상태: 켤지 묻는 중 — {detail}"),
+            "ERROR" => format!("상태: 켜지 못함 — {detail}"),
+            other => format!("상태: {other}"),
+        }));
         let mem = ai_runtime::available_memory_kib();
         let level = match ai_runtime::memory_level(mem) {
             ai_runtime::MemoryLevel::Enough => "바로 켤 수 있습니다",
@@ -746,7 +754,12 @@ fn status_sections(content: &Path, docs: &[Doc], engine: &ai_runtime::Controller
             ai_runtime::gib(ai_runtime::MEMORY_MINIMUM_KIB)
         )));
         ai.push(Text("인터넷을 쓰지 않고 이 PC 안에서만 동작합니다.".into()));
-        ai.push(Button("[p AI on/off]".into(), 16));
+        if phase == "CONFIRM_MEMORY" {
+            ai.push(Button("[Enter 그래도 켜기]".into(), 12));
+            ai.push(Button("[Esc 취소]".into(), 13));
+        } else {
+            ai.push(Button("[p AI on/off]".into(), 16));
+        }
     }
 
     let (map_lines, cpu) = maps::status(content);
