@@ -78,12 +78,17 @@ pub(super) fn load_approved(root: &Path) -> Result<(Vec<Doc>, PathBuf), Error> {
         if policies.is_empty() {
             return Err("Empty rights evidence".into());
         }
+        let own_dir = format!("{entry}/");
         for p in policies {
-            checked(
-                root,
-                p["file"].as_str().ok_or("Missing policy path")?,
-                &p["sha256"],
-            )?;
+            let file = p["file"].as_str().ok_or("Missing policy path")?;
+            // A document's own source page may be its rights evidence (licence
+            // footer). Like the raw page above, raw files in the document's folder
+            // are left out of the public release (their hashes stay in record.json);
+            // verify them when present. Shared evidence under policies/ is required.
+            if file.starts_with(&own_dir) && !root.join(file).exists() {
+                continue;
+            }
+            checked(root, file, &p["sha256"])?;
         }
         let (content, record) = text
             .split_once("\n## 출처·편집 기록\n")

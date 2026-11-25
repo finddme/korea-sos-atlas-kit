@@ -312,7 +312,10 @@ pub(super) fn launch(root: &Path) -> String {
     let mut software = can_fall_back && marker.as_ref().is_some_and(|m| m.is_file());
     let remember_software = |marker: &Option<PathBuf>| {
         if let Some(m) = marker {
-            let _ = fs::write(m, "The map viewer crashed at start-up; it now renders on the CPU.\n");
+            let _ = fs::write(
+                m,
+                "The map viewer crashed at start-up; it now renders on the CPU.\n",
+            );
         }
     };
     match (|| -> Result<PathBuf, Error> {

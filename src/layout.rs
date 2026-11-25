@@ -67,6 +67,9 @@ pub struct Asset {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AiAssets {
     pub model: Asset,
+    /// Further GGUF shards after `model` (the AI pack splits the model so each
+    /// download stays under GitHub's 2 GB limit; llama.cpp loads the rest itself).
+    pub model_parts: Vec<Asset>,
     pub engine: Asset,
     /// Shared libraries the engine loads (llama.cpp's `llama-server.exe` is a
     /// small launcher; the inference code lives in these files).
@@ -124,9 +127,7 @@ pub fn ai_assets(data: &Path) -> Result<AiAssets, String> {
             Ok(a)
         };
     if manifest.is_null() && env("SOS_AI_MODEL").is_none() {
-        return Err(
-            "AI 자산 목록(assets.json)이 없습니다. 모델을 포함하지 않은 Light 구성입니다.".into(),
-        );
+        return Err("AI 자산 목록(assets.json)이 없습니다. AI를 쓸 수 없는 구성입니다.".into());
     }
     let model = pick(
         &manifest["model"],
@@ -134,6 +135,20 @@ pub fn ai_assets(data: &Path) -> Result<AiAssets, String> {
         "SOS_AI_MODEL",
         "SOS_AI_MODEL_SHA256",
     )?;
+    let model_parts = if env("SOS_AI_MODEL").is_some() {
+        vec![]
+    } else {
+        manifest["model"]["parts"]
+            .as_array()
+            .map(|parts| {
+                parts
+                    .iter()
+                    .map(|p| asset(data, p, "모델 조각"))
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()?
+            .unwrap_or_default()
+    };
     let entry = &manifest["engine"][platform()];
     let what = format!("{} 추론 엔진", platform());
     let engine = pick(entry, &what, "SOS_LLAMA_SERVER", "SOS_LLAMA_SERVER_SHA256")?;
@@ -159,20 +174,22 @@ pub fn ai_assets(data: &Path) -> Result<AiAssets, String> {
     };
     Ok(AiAssets {
         model,
+        model_parts,
         engine,
         engine_libs,
     })
 }
+
+pub const AI_PACK_MISSING: &str = "AI 추가팩이 없습니다. 배포 페이지(Releases)에서 AI 추가팩 2개(ai-pack-1, ai-pack-2)를 받아 이 앱과 같은 위치에 풀면 AI를 쓸 수 있습니다. 자료 검색·대피시설·지도는 그대로 쓸 수 있습니다.";
 
 /// Cheap startup check: manifest readable and both files present. Hashes are
 /// verified later, when the user turns AI on.
 pub fn ai_unavailable_reason(data: &Path) -> Option<String> {
     match ai_assets(data) {
         Err(e) => Some(e),
-        Ok(a) if !a.model.path.is_file() => Some(
-            "이 구성에는 AI 모델 파일이 없습니다. 자료 검색과 열람은 그대로 사용할 수 있습니다."
-                .into(),
-        ),
+        Ok(a) if !a.model.path.is_file() || a.model_parts.iter().any(|p| !p.path.is_file()) => {
+            Some(AI_PACK_MISSING.into())
+        }
         Ok(a) if !a.engine.path.is_file() || a.engine_libs.iter().any(|l| !l.path.is_file()) => {
             Some(format!(
             "이 운영체제({})용 추론 엔진이 없습니다. 자료 검색과 열람은 그대로 사용할 수 있습니다.",
@@ -223,16 +240,19 @@ mod tests {
         let h = "a".repeat(64);
         let manifest = serde_json::json!({
             "version": 1,
-            "model": {"file": "models/m.gguf", "sha256": h},
+            "model": {"file": "models/m.gguf", "sha256": h, "parts": [{"file": "models/m-2.gguf", "sha256": h}]},
             "engine": {platform(): {"file": "runtime/e", "sha256": h, "libs": {"runtime/l.dll": h}}}
         });
         fs::write(data.join("assets.json"), manifest.to_string()).unwrap();
         let a = ai_assets(&data).unwrap();
         assert_eq!(a.model.path, data.join("models/m.gguf"));
         assert_eq!(a.engine.path, data.join("runtime/e"));
-        assert!(ai_unavailable_reason(&data).unwrap().contains("모델"));
+        assert_eq!(a.model_parts[0].path, data.join("models/m-2.gguf"));
+        assert_eq!(ai_unavailable_reason(&data).unwrap(), AI_PACK_MISSING);
         fs::create_dir_all(data.join("models")).unwrap();
         fs::write(data.join("models/m.gguf"), "x").unwrap();
+        assert_eq!(ai_unavailable_reason(&data).unwrap(), AI_PACK_MISSING);
+        fs::write(data.join("models/m-2.gguf"), "x").unwrap();
         assert!(ai_unavailable_reason(&data).unwrap().contains("추론 엔진"));
         fs::create_dir_all(data.join("runtime")).unwrap();
         fs::write(data.join("runtime/e"), "x").unwrap();
@@ -264,7 +284,9 @@ mod tests {
     fn light_build_without_manifest_is_unavailable_not_an_error() {
         let data = tmp("light");
         if std::env::var_os("SOS_AI_MODEL").is_none() {
-            assert!(ai_unavailable_reason(&data).unwrap().contains("Light"));
+            assert!(ai_unavailable_reason(&data)
+                .unwrap()
+                .contains("assets.json"));
         }
         fs::remove_dir_all(data).unwrap();
     }

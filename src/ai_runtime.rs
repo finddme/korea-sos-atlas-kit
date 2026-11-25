@@ -43,7 +43,7 @@ pub struct Controller {
     corpus: Arc<Vec<Value>>,
     root: PathBuf,
     retained: Option<Update>,
-    /// Why AI cannot run in this build (e.g. Light without a model), if so.
+    /// Why AI cannot run in this build (e.g. Atlas without the AI pack), if so.
     pub unavailable: Option<String>,
 }
 impl Controller {
@@ -834,10 +834,16 @@ fn serve(
 ) -> Result<()> {
     let assets = crate::layout::ai_assets(root).map_err(|e| fail(Code::Asset, e))?;
     let (engine, model) = (assets.engine.path.clone(), assets.model.path.clone());
-    if !engine.is_file() || !model.is_file() {
-        return Err(fail(Code::Asset, "모델 또는 추론 엔진 파일이 없습니다."));
+    if !model.is_file() || assets.model_parts.iter().any(|p| !p.path.is_file()) {
+        return Err(fail(Code::Asset, crate::layout::AI_PACK_MISSING));
+    }
+    if !engine.is_file() {
+        return Err(fail(Code::Asset, "추론 엔진 파일이 없습니다."));
     }
     verify_asset(&model, &assets.model.sha256, cancel)?;
+    for part in &assets.model_parts {
+        verify_asset(&part.path, &part.sha256, cancel)?;
+    }
     verify_asset(&engine, &assets.engine.sha256, cancel)?;
     for lib in &assets.engine_libs {
         verify_asset(&lib.path, &lib.sha256, cancel)?;
