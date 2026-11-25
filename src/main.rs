@@ -768,6 +768,7 @@ fn draw(f: &mut Frame, a: &mut App, docs: &[Doc], rows: &[usize], ai: &Ai, bench
         ] {
             put(f, y, right + 2, s, w - right - 5, normal)
         }
+        put(f, h - 2, 2, maps::MAP_ATTRIBUTION, w - 4, normal);
         return;
     }
     let sy = if w >= 115 { 1 } else { 2 };
@@ -838,6 +839,12 @@ fn draw(f: &mut Frame, a: &mut App, docs: &[Doc], rows: &[usize], ai: &Ai, bench
         edge + 2,
         if CATS[a.cat] == "대피시설" {
             "Facility names / addresses"
+        } else if CATS[a.cat] == "지도" {
+            if str_width(maps::MAP_ATTRIBUTION) <= w - edge - 4 {
+                maps::MAP_ATTRIBUTION
+            } else {
+                "Map data © OpenStreetMap and Organic Maps · Links: [3 Settings]"
+            }
         } else {
             "Guides · Facilities: 대피시설"
         },

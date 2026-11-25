@@ -46,6 +46,12 @@ pub(super) fn destination(root: &Path, location: Option<&shelters::Location>) ->
     }
 }
 
+/// Required by the Organic Maps Binary Data License for apps that ship its map
+/// files: shown on the map (viewer), in the Settings/About view and the 지도
+/// category of the library, and when the map opens.
+pub(super) const MAP_ATTRIBUTION: &str =
+    "Map data © OpenStreetMap and Organic Maps · https://organicmaps.app · https://openstreetmap.org/copyright";
+
 const NOT_THIS_OS: &str = "이 운영체제에서는 아직 지도 보기가 되지 않습니다. 대피시설 목록과 주소 검색은 그대로 쓸 수 있습니다.";
 
 /// Per-OS viewer folder under the data folder's `runtime/`.
@@ -347,9 +353,9 @@ pub(super) fn launch(root: &Path) -> String {
         Ok(log)
     })() {
         Ok(_) if software => {
-            "Organic Maps opened · Offline · CPU rendering (no usable graphics driver)".into()
+            "Organic Maps opened · Offline · CPU rendering (no usable graphics driver) · Map data © OpenStreetMap and Organic Maps".into()
         }
-        Ok(_) => "Organic Maps opened · Offline · Close its window to release memory".into(),
+        Ok(_) => "Organic Maps opened · Offline · Close its window to release memory · Map data © OpenStreetMap and Organic Maps".into(),
         Err(e) => {
             RUNNING.store(false, Ordering::SeqCst);
             format!("Maps: {e}")

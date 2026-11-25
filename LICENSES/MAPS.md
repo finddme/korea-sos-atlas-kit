@@ -1,36 +1,40 @@
-# 지도 데이터와 뷰어 권리 검토
+# 지도 데이터와 지도 프로그램 권리
 
-검토일: 2026-11-14. 앱 자체 라이선스와 지도 데이터 라이선스를 구분한다.
+검토일: 2026-11-14, 배포판 기준 갱신: 2026-11-25. 앱 자체 라이선스(AGPL-3.0-only)와 지도 데이터·지도 프로그램의 라이선스는 서로 다르며, 앱 라이선스로 바꾸지 않습니다.
 
-## Organic Maps
+## 배포판에 들어 있는 것
 
-- 뷰어 소스: https://github.com/organicmaps/organicmaps — Apache-2.0. 원래 브랜드·저작권·제3자 고지를 유지한 별도 뷰어로 실행한다.
-- 제공 바이너리 지도: https://github.com/organicmaps/organicmaps/blob/master/DATA_LICENSE.txt — 별도 Organic Maps Binary Data License. 원문은 `Organic-Maps-DATA-LICENSE.txt`에 보존했다.
-- 지도와 사용자에게 보이는 메뉴/소개에 `Map data © OpenStreetMap and Organic Maps` 표시 및 양쪽 클릭 가능한 링크가 필요하다. 데이터 재배포는 이 고지 조건을 준수해야 한다. 화이트라벨·리브랜딩은 별도 서면 허가가 필요하므로 하지 않는다.
-- 데이터에는 OSM ODbL, Wikipedia CC BY-SA 4.0 및 지형 등 별도 출처가 있다. 배포본 원래 copyright 자료도 함께 보존한다. 다운로드 파일을 SOS 자체 지도라고 재표기하지 않는다.
-- OSM: https://www.openstreetmap.org/copyright ; https://opendatacommons.org/licenses/odbl/1-0/ . 복사·재배포·수정 가능, 출처 고지 및 파생 데이터베이스 동일조건 의무. Organic Maps 지도는 해당 제공자 문서상 Produced Work이다.
-- 한국어 지명은 원래 지도 데이터 그대로 이용한다. 이번 작업에서 지형/위키 설명의 독자 번역·편집은 하지 않는다.
+| 구성 | 내용 | 권리 |
+|---|---|---|
+| 지도 프로그램 | Organic Maps 데스크톱 릴리스 `2026.11.11-39`(`5c0c5ec0a706b9bea17b4d5b0b40e7b60f916a13`)에 이 저장소의 [사용성 개선 패치](../integrations/organicmaps/desktop-usability-2026.11.patch)를 적용해 GitHub Actions로 빌드한 Windows x64 판 | Apache-2.0. 원본 `LICENSE`·`NOTICE`와 패치, 빌드 기록을 배포판 `data/runtime/organicmaps-win-x64/licenses/`에 보존 |
+| 함께 든 실행 구성 요소 | Qt 6.8.3, Visual C++ 런타임, CPU 렌더링용 Mesa 26.2.5(llvmpipe) | 각 고지를 같은 `licenses/` 폴더에 보존(Mesa·LLVM 라이선스 포함) |
+| 지도 데이터 | 대한민국 북부·남부 지도 `260527`판(`South Korea_North.mwm` 197,402,970바이트, `South Korea_South.mwm` 167,567,274바이트)과 지도 프로그램에 든 세계 기본 지도(`World.mwm`, `WorldCoasts.mwm`) | Organic Maps Binary Data License([원문](Organic-Maps-DATA-LICENSE.txt)). OpenStreetMap ODbL 기반 Produced Work |
 
-## 수집 범위와 상태
+지도 파일과 지도 프로그램은 배포판 `data/assets.json`과 `content-library/maps.json`에 SHA-256이 고정되어 있고, 앱은 지도를 열기 전에 모든 파일을 대조합니다.
 
-대한민국 지도와 실행에 필요한 세계 기본 지도만 대상으로 한다. Organic Maps 명칭·고지를 유지하면서 기존 C++/Qt 뷰어의 조작성을 개선하고 Korea SOS Atlas Kit에서 연결 및 한국어 사용 안내를 제공한다. 공식 대피소·급수시설 데이터는 별도 출처 심사 없이는 OSM 시설 목록으로 대체하여 확보 완료 처리하지 않는다.
+## Organic Maps 지도 데이터 조건과 지킨 방법
 
-### 데스크톱 수정판
+| 조건(Binary Data License) | 지킨 방법 |
+|---|---|
+| 지도와 정보 화면·메인 메뉴 등 보이는 곳에 "Map data © OpenStreetMap and Organic Maps" 표시 | 지도 프로그램 창 왼쪽 아래와 정보 화면에 원래 고지 유지. 키트 앱에서는 Settings 화면, 지도 분류, 지도를 열 때 알림에 같은 문구 표시 |
+| Organic Maps·OpenStreetMap 표기마다 `https://organicmaps.app`, `https://openstreetmap.org/copyright` 링크 | 지도 프로그램은 누를 수 있는 링크로 표시. 키트 앱 Settings 화면과 README에 두 주소를 함께 표시(Windows Terminal에서는 주소를 눌러 열 수 있음) |
+| 출처 표시 없이 지도 파일을 배포하지 않기 | 위 표시와 이 문서, 원문 라이선스를 배포판에 함께 둠 |
+| 화이트라벨·리브랜딩 금지(별도 서면 허가 필요) | 이름·로고·지도 고지를 바꾸지 않음. 창 제목은 "Organic Maps · Korea SOS Atlas Kit 사용성 개선판"으로 Organic Maps 이름을 유지하고 수정판임만 덧붙임. 지도 파일을 키트 자체 지도라고 표기하지 않음 |
 
-고정 소스 `d81f9197c6759f67aaed60f4f9c819e834dd02cd`에 적용하는 [수정 패치·빌드 명세](../integrations/organicmaps/README.md)를 보존한다. 이 패치는 Apache-2.0으로 제공하며 upstream LICENSE·NOTICE를 함께 둔다. 변경 파일에 수정 고지를 추가하고 창 제목·정보 화면에 수정판임을 표시했다. 원래 로고·브랜드·저작권 자료와 클릭 가능한 OSM/Organic Maps 및 Organic Maps Project 링크를 유지한다. 지도 데이터는 변경하지 않았다. MAPS.ME 코드를 복사하지 않았다. Rust 본체의 AGPL과 이 별도 실행 뷰어·지도 데이터의 라이선스를 혼동하지 않는다.
+지도 데이터에는 OpenStreetMap(ODbL), Wikipedia 문구(CC BY-SA 4.0), 지형 자료 등 원래 출처가 들어 있습니다. 한국어 지명은 원래 지도 데이터 그대로이며 별도로 번역·편집하지 않았습니다.
 
-수집 전 내용 적합성: 공식 Linux 사용 안내에서 다운로드 후 오프라인 열람·장소 검색·좌표 또는 지도 클릭에 의한 경로 계산을 확인했다. https://organicmaps.app/faq/linux/how-to-use-flatpak/
+- OpenStreetMap: https://www.openstreetmap.org/copyright , ODbL 1.0: https://opendatacommons.org/licenses/odbl/1-0/
+- Organic Maps 소스: https://github.com/organicmaps/organicmaps
 
-실제 파일/버전/무결성 및 실사용 검증 상태는 `dev/content-library/sources/지도·위치/korea-organic-maps/record.json`에 기록한다. 이 문서만으로 배포 번들 검증 완료를 뜻하지 않는다.
+## 이용 범위
 
-## 검증된 배포 조합
+- 지도 프로그램은 오프라인 모드로 실행되어 인터넷 요청을 하지 않습니다(지도 내려받기·업데이트·편집 업로드를 막음).
+- 위치는 Windows 위치 서비스를 통해 받으며, 지도 파일만으로 GPS가 생기지는 않습니다.
+- 공식 대피·급수시설은 행정안전부 공공데이터(별도 권리)에서 오며, OpenStreetMap 시설 목록으로 대체하지 않았습니다. 키트에서 고른 시설 좌표만 지도에 목적지로 보냅니다.
 
-- 실제 채택 파일은 260527판 대한민국 북부/남부(364,970,244 bytes)이며 뷰어의 countries.txt에 기록된 SHA-1·크기를 모두 대조했다. 추가로 SHA-256을 `maps.json`에 기록해 실행 전 검사한다.
-- 채택 버전의 라이선스 원문: https://github.com/organicmaps/organicmaps/blob/d81f9197c6759f67aaed60f4f9c819e834dd02cd/DATA_LICENSE.txt . `Organic-Maps-DATA-LICENSE.txt`는 이 고정 버전이다. 최신 정책도 확인했으며 화이트라벨/출처 제거는 하지 않는다.
-- Linux 뷰어 Flatpak commit: `94710ca4dc483f8eb7dca05b1960e24e3d16066fce7128729e33ccb67e2a9b15` (2026.05.28-2). 원래 Organic Maps 명칭·로고·지도 출처·Help/저작권 자료를 유지한다. 지도 화면 왼쪽 하단의 OSM/Organic Maps 고지를 확인했다.
-- 코드/포함 자료의 원래 고지는 `dev/runtime/maps/data/flatpak/app/app.organicmaps.desktop/x86_64/stable/active/files/share/organicmaps/data/copyright.html` 및 패키지의 원래 고지에 있다. 이를 공개 번들에서 제거하지 않는다.
-- KDE/Qt/Mesa/Flatpak 및 부트스트랩 라이브러리는 앱 자체 AGPL로 재라이선스하지 않는다. Flathub 원래 패키지·메타데이터·저작권 고지를 보존한다. 부트스트랩 Ubuntu 패키지의 고지는 `bootstrap/usr/share/doc/*/copyright`에 있다. GPL/LGPL 등 개별 의존성의 대응 소스 제공 의무도 공개 이미지 제작 시 패키지별로 충족해야 한다. 현재 개발 런타임을 소스 저장소에 업로드하지 않는다.
-- 취득 경로: https://flathub.org/apps/app.organicmaps.desktop 및 Ubuntu noble 공식 패키지 저장소. Flatpak 저장소 GPG 검증을 사용했다.
+## Linux 빌드(개발용)
+
+이 저장소에는 Linux용 패치(`integrations/organicmaps/desktop-usability.patch`, Organic Maps `d81f9197` 기준)와 빌드 스크립트도 있습니다. 배포판(Windows)에는 들어가지 않으며, 빌드 방법은 [integrations/organicmaps/](../integrations/organicmaps/README.md)를 참고하세요.
 
 ## MAPS.ME 대체 후보 검토 — 2026-11-14
 
