@@ -309,9 +309,14 @@ fn spawn_viewer(root: &Path, software: bool) -> Result<(std::process::Child, Pat
     Ok((cmd.spawn()?, log))
 }
 
-/// Lines for the Status view and whether CPU rendering is remembered.
-pub(super) fn status(root: &Path) -> (Vec<String>, bool) {
-    let mut lines = Vec::new();
+/// Map state for the Status view.
+pub(super) struct MapStatus {
+    pub installed: bool,
+    pub supported: bool,
+    pub version: Option<String>,
+    pub cpu: bool,
+}
+pub(super) fn status(root: &Path) -> MapStatus {
     let installed = match root.parent() {
         Some(data) if cfg!(windows) => data.join(WINDOWS_VIEWER).join("OrganicMaps.exe").is_file(),
         Some(data) => data.join("runtime/maps").is_dir(),
@@ -325,28 +330,16 @@ pub(super) fn status(root: &Path) -> (Vec<String>, bool) {
             Value::Number(v) => Some(v.to_string()),
             _ => None,
         });
-    lines.push(if installed {
-        "지도 프로그램: 있음 (Organic Maps 사용성 개선판)".into()
-    } else if cfg!(any(windows, target_os = "linux")) {
-        "지도 프로그램: 없음 — 자료와 대피시설 목록은 그대로 쓸 수 있습니다".into()
-    } else {
-        "이 운영체제에서는 지도 보기가 되지 않습니다".into()
-    });
-    lines.push(match version {
-        Some(v) => format!("지도 파일: 대한민국 {v}판 (오프라인)"),
-        None => "지도 파일: 없음".into(),
-    });
     let cpu = cfg!(windows)
         && state_dir(root)
             .map(|d| d.join(SOFTWARE_GL_MARKER).is_file())
             .unwrap_or(false);
-    lines.push(if cpu {
-        "그리기: CPU 렌더링 (그래픽 드라이버를 쓸 수 없던 기록이 있어 CPU로 그립니다)".into()
-    } else {
-        "그리기: 그래픽 카드 (안 되면 자동으로 CPU 렌더링)".into()
-    });
-    lines.push("인터넷: 쓰지 않음 (내려받기·업데이트·업로드 차단)".into());
-    (lines, cpu)
+    MapStatus {
+        installed,
+        supported: cfg!(any(windows, target_os = "linux")),
+        version,
+        cpu,
+    }
 }
 
 /// Forget the CPU rendering fallback: the next launch tries the graphics card.

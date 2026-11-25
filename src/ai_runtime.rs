@@ -1967,6 +1967,30 @@ fn hash_asset(path: &Path, expected: &str, cancel: &AtomicBool) -> Result<()> {
 pub fn available_memory_kib() -> Option<u64> {
     available_memory()
 }
+/// Total physical memory in KiB, for the Status view.
+pub fn total_memory_kib() -> Option<u64> {
+    #[cfg(windows)]
+    {
+        let mut m = job::MemoryStatus {
+            length: std::mem::size_of::<job::MemoryStatus>() as u32,
+            load: 0,
+            total_phys: 0,
+            avail_phys: 0,
+            rest: [0; 5],
+        };
+        (unsafe { job::GlobalMemoryStatusEx(&mut m) } != 0).then_some(m.total_phys / 1024)
+    }
+    #[cfg(not(windows))]
+    {
+        fs::read_to_string("/proc/meminfo")
+            .ok()?
+            .lines()
+            .find_map(|l| {
+                l.strip_prefix("MemTotal:")
+                    .and_then(|s| s.split_whitespace().next()?.parse().ok())
+            })
+    }
+}
 /// Available physical memory in KiB. Tests can substitute the value with a file
 /// named by SOS_AI_FAKE_AVAILABLE_FILE (read on every call, so a test can lower
 /// it while the model runs).

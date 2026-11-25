@@ -413,6 +413,8 @@ struct App {
     /// Status view (3): sections built each frame, and where its buttons are.
     status: Vec<Section>,
     status_buttons: Vec<(u16, u16, u16, u8)>,
+    /// Available memory sampled once a second (last 60), for the Status chart.
+    mem_history: std::collections::VecDeque<u64>,
 }
 #[derive(Default, Deserialize, PartialEq)]
 struct Ai {
@@ -655,8 +657,15 @@ fn thousands(n: usize) -> String {
     out
 }
 enum StatusLine {
-    Text(String),
-    /// Label and hit kind (16 AI on/off, 17 use graphics card, 18 open licences).
+    /// Muted explanatory text.
+    Note(String),
+    /// Name and value in aligned columns; the value is drawn in the colour.
+    Kv(Option<u8>, String, String),
+    /// Memory bar: filled fraction, colour, and labelled marks (fraction, label).
+    Bar(f64, u8, Vec<(f64, String)>),
+    /// One row of colour cells, one per sample (oldest first).
+    Strip(Vec<u8>),
+    /// Label and hit kind (17 use graphics card, 18 open licences).
     Button(String, u8),
 }
 struct Section {
@@ -664,42 +673,51 @@ struct Section {
     color: u8,
     lines: Vec<StatusLine>,
 }
-/// The Status view (3): what this kit contains and the state of AI and maps.
-fn status_sections(content: &Path, docs: &[Doc], engine: &ai_runtime::Controller) -> Vec<Section> {
-    use StatusLine::{Button, Text};
+const GREEN: u8 = 46;
+const YELLOW: u8 = 226;
+const RED: u8 = 160;
+const GREY: u8 = 244;
+fn level_color(kib: u64) -> u8 {
+    match ai_runtime::memory_level(Some(kib)) {
+        ai_runtime::MemoryLevel::Enough => GREEN,
+        ai_runtime::MemoryLevel::Low(_) => YELLOW,
+        ai_runtime::MemoryLevel::TooLow(_) => RED,
+    }
+}
+/// The Status view (3): read-only state of the kit, AI, memory and maps.
+fn status_sections(
+    content: &Path,
+    docs: &[Doc],
+    engine: &ai_runtime::Controller,
+    history: &std::collections::VecDeque<u64>,
+) -> Vec<Section> {
+    use StatusLine::{Bar, Button, Kv, Note, Strip};
     let data = layout::data_root(content);
-    let facilities = docs
-        .iter()
-        .filter(|d| d.location.is_some() || d.id.starts_with("shelter:"))
-        .count();
-    let manuals = docs
-        .iter()
-        .filter(|d| d.id.contains(':') && !d.id.starts_with("shelter:") && d.location.is_none())
-        .count();
-    let guides = docs.len() - facilities - manuals;
-    let mut content_lines = vec![
-        Text(format!(
-            "자료 {}건 (안내 자료 {guides}건 + 미군 생존 교범 {manuals}항목)",
-            guides + manuals
-        )),
-        Text(format!(
-            "대피·급수·의료 시설 {}곳 (행정안전부 공공데이터)",
-            thousands(facilities)
-        )),
-    ];
-    content_lines.push(Text(if content.join("default-local.json").exists() {
-        "개인용 로컬 자료가 함께 들어 있습니다. 이 폴더는 다른 사람에게 배포하지 마세요.".into()
-    } else {
-        "재배포·번역·편집이 허용된 공개 자료만 들어 있습니다.".into()
-    }));
-    content_lines.push(Text(
-        "실시간 경보·대피소 개방 여부는 방송과 현장 안내를 따르세요.".into(),
-    ));
+    let kv = |c: Option<u8>, k: &str, v: String| Kv(c, k.into(), v);
 
+    // AI
+    let engine_proc = ai_runtime::engine_process();
     let mut ai = Vec::new();
     if let Some(reason) = &engine.unavailable {
-        ai.push(Text(format!("사용 불가: {reason}")));
+        ai.push(kv(Some(GREY), "상태", "사용할 수 없음".into()));
+        ai.push(Note(reason.clone()));
     } else {
+        let phase = engine.status.phase.as_str();
+        let (color, state) = match phase {
+            "" | "OFF" => (GREY, "꺼짐"),
+            "READY" => (GREEN, "켜짐 (질문할 수 있음)"),
+            "STARTING" => (YELLOW, "켜는 중"),
+            "SEARCHING" | "ANSWERING" => (GREEN, "답변 중"),
+            "STOPPING" => (YELLOW, "끄는 중"),
+            "CONFIRM_MEMORY" => (YELLOW, "켤지 묻는 중"),
+            "ERROR" => (RED, "켜지 못했거나 멈춤"),
+            other => (GREY, other),
+        };
+        ai.push(kv(Some(color), "상태", state.into()));
+        ai.push(match engine_proc {
+            Some((pid, _)) => kv(Some(GREEN), "AI 엔진", format!("실행 중 · 프로세스 {pid}")),
+            None => kv(Some(GREY), "AI 엔진", "종료됨 (모델 메모리 해제됨)".into()),
+        });
         if let Ok(assets) = layout::ai_assets(&data) {
             let name = assets
                 .model
@@ -707,113 +725,236 @@ fn status_sections(content: &Path, docs: &[Doc], engine: &ai_runtime::Controller
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            ai.push(Text(format!(
-                "모델: {name}{}",
-                if assets.model_parts.is_empty() {
-                    String::new()
+            let name = name
+                .split("-00001-of-")
+                .next()
+                .unwrap_or(&name)
+                .trim_end_matches(".gguf");
+            let parts = 1 + assets.model_parts.len();
+            ai.push(kv(
+                None,
+                "모델",
+                if parts > 1 {
+                    format!("{name} ({parts}조각)")
                 } else {
-                    format!(" 외 {}조각", assets.model_parts.len())
-                }
-            )));
+                    name.to_owned()
+                },
+            ));
         }
-        // Read-only: turning AI on or off is done in the AI pane ([2] / p).
-        let phase = engine.status.phase.as_str();
-        let detail = engine.status.text.replace('\n', " ");
-        let detail = detail
-            .split("[Enter")
-            .next()
-            .unwrap_or("")
-            .trim()
-            .to_owned();
-        ai.push(Text(match phase {
-            "" | "OFF" => "상태: 꺼짐".into(),
-            "READY" => "상태: 켜짐 (질문할 수 있음)".into(),
-            "STARTING" => "상태: 켜는 중".into(),
-            "SEARCHING" | "ANSWERING" => "상태: 답변 중".into(),
-            "STOPPING" => "상태: 끄는 중".into(),
-            "CONFIRM_MEMORY" => {
-                format!("상태: 켤지 묻는 중 (\"2 Show AI\"에서 Enter/Esc로 답함) — {detail}")
-            }
-            "ERROR" => format!("상태: 켜지 못했거나 멈춤 — {detail}"),
-            other => format!("상태: {other}"),
-        }));
-        // Checked against the real process, so "종료됨" means the memory is free.
-        ai.push(Text(match ai_runtime::engine_process() {
-            Some((pid, mem)) => format!(
-                "AI 엔진: 실행 중 (프로세스 {pid}{})",
-                mem.map(|m| format!(" · 메모리 {} 사용", ai_runtime::gib(m)))
-                    .unwrap_or_default()
-            ),
-            None => "AI 엔진: 종료됨 — 모델이 메모리에 올라가 있지 않습니다".into(),
-        }));
         let mem = ai_runtime::available_memory_kib();
-        let running = ai_runtime::engine_process().is_some();
-        let level = match (running, ai_runtime::memory_level(mem)) {
-            (true, _) => "AI가 켜져 있는 동안의 값",
-            (false, ai_runtime::MemoryLevel::Enough) => "켜면 바로 켜집니다",
-            (false, ai_runtime::MemoryLevel::Low(_)) => "켜면 확인을 묻습니다 (느려질 수 있음)",
-            (false, ai_runtime::MemoryLevel::TooLow(_)) => "부족해서 켤 수 없습니다",
-        };
-        ai.push(Text(format!(
-            "사용 가능한 메모리: {} — {level}",
-            mem.map(ai_runtime::gib)
-                .unwrap_or_else(|| "확인 불가".into())
-        )));
-        ai.push(Text(format!(
-            "기준: 권장 {} · 최소 {} · 답할 때 약 1.6GB 사용",
-            ai_runtime::gib(ai_runtime::MEMORY_RECOMMENDED_KIB),
-            ai_runtime::gib(ai_runtime::MEMORY_MINIMUM_KIB)
-        )));
-        ai.push(Text("인터넷 연결 없이 동작하는 AI입니다.".into()));
-        ai.push(Text(
+        ai.push(match (engine_proc.is_some(), mem) {
+            (true, _) => kv(Some(GREEN), "지금", "켜져 있음".into()),
+            (false, Some(m)) => kv(
+                Some(level_color(m)),
+                "지금 켜면",
+                match ai_runtime::memory_level(Some(m)) {
+                    ai_runtime::MemoryLevel::Enough => "바로 켜집니다".into(),
+                    ai_runtime::MemoryLevel::Low(_) => "확인을 묻습니다 (느려질 수 있음)".into(),
+                    ai_runtime::MemoryLevel::TooLow(_) => "메모리가 부족해 켤 수 없습니다".into(),
+                },
+            ),
+            (false, None) => kv(None, "지금 켜면", "메모리를 확인할 수 없음".into()),
+        });
+        if matches!(phase, "CONFIRM_MEMORY" | "ERROR") {
+            let detail = engine.status.text.replace('\n', " ");
+            let detail = detail
+                .split("[Enter")
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_owned();
+            ai.push(Note(detail));
+        }
+        ai.push(Note("인터넷 연결 없이 동작하는 AI입니다.".into()));
+        ai.push(Note(
             "켜기·끄기: 상단 \"2 Show AI\"에서 조작할 수 있습니다.".into(),
         ));
     }
 
-    let (map_lines, cpu) = maps::status(content);
-    let mut map: Vec<StatusLine> = map_lines.into_iter().map(Text).collect();
-    if cpu {
+    // Memory
+    let mut memory = Vec::new();
+    let avail = ai_runtime::available_memory_kib();
+    let total = ai_runtime::total_memory_kib();
+    match (avail, total) {
+        (Some(av), Some(t)) if t > 0 => {
+            memory.push(kv(
+                None,
+                "사용 가능",
+                format!("{} / 전체 {}", ai_runtime::gib(av), ai_runtime::gib(t)),
+            ));
+            memory.push(Bar(
+                av as f64 / t as f64,
+                level_color(av),
+                vec![
+                    (
+                        ai_runtime::MEMORY_MINIMUM_KIB as f64 / t as f64,
+                        "최소".into(),
+                    ),
+                    (
+                        ai_runtime::MEMORY_RECOMMENDED_KIB as f64 / t as f64,
+                        "권장".into(),
+                    ),
+                ],
+            ));
+        }
+        (Some(av), _) => memory.push(kv(None, "사용 가능", ai_runtime::gib(av))),
+        _ => memory.push(kv(None, "사용 가능", "확인할 수 없음".into())),
+    }
+    if let (Some(lo), Some(hi)) = (history.iter().min(), history.iter().max()) {
+        memory.push(kv(
+            None,
+            "최근 1분",
+            format!(
+                "최저 {} · 최고 {}",
+                ai_runtime::gib(*lo),
+                ai_runtime::gib(*hi)
+            ),
+        ));
+        // Green / yellow / red per second: shows memory moving across the
+        // AI thresholds, which changes what turning AI on does.
+        memory.push(Strip(history.iter().map(|&v| level_color(v)).collect()));
+    }
+    memory.push(match engine_proc {
+        Some((_, Some(m))) => kv(
+            Some(GREEN),
+            "AI 엔진",
+            format!("{} 사용 중", ai_runtime::gib(m)),
+        ),
+        Some((_, None)) => kv(Some(GREEN), "AI 엔진", "실행 중".into()),
+        None => kv(Some(GREY), "AI 엔진", "메모리 사용 없음".into()),
+    });
+    memory.push(Note(format!(
+        "AI 기준: 권장 {} · 최소 {} · 답할 때 약 1.6GB 사용",
+        ai_runtime::gib(ai_runtime::MEMORY_RECOMMENDED_KIB),
+        ai_runtime::gib(ai_runtime::MEMORY_MINIMUM_KIB)
+    )));
+
+    // Content
+    let count = |prefix: &str| docs.iter().filter(|d| d.title.starts_with(prefix)).count();
+    let facilities = docs.iter().filter(|d| d.id.starts_with("shelter:")).count();
+    let manuals = docs
+        .iter()
+        .filter(|d| d.id.contains(':') && !d.id.starts_with("shelter:"))
+        .count();
+    let guides = docs.len() - facilities - manuals;
+    let local = content.join("default-local.json").exists();
+    let content_lines = vec![
+        kv(
+            None,
+            "자료",
+            format!("{}건 (안내 {guides} · 교범 {manuals})", guides + manuals),
+        ),
+        kv(None, "시설", format!("{}곳", thousands(facilities))),
+        kv(
+            None,
+            "",
+            format!(
+                "대피 {} · 급수 {} · 의료 {}",
+                thousands(count("[민방위]")),
+                thousands(count("[비상급수]")),
+                thousands(count("[응급의료"))
+            ),
+        ),
+        if local {
+            kv(
+                Some(RED),
+                "배포",
+                "개인용 로컬 자료 포함 — 다른 사람에게 배포 금지".into(),
+            )
+        } else {
+            kv(
+                Some(GREEN),
+                "권리",
+                "재배포·번역·편집이 허용된 공개 자료만".into(),
+            )
+        },
+        Note("실시간 경보·대피소 개방 여부는 방송과 현장 안내를 따르세요.".into()),
+    ];
+
+    // Map
+    let m = maps::status(content);
+    let mut map = vec![
+        if !m.supported {
+            kv(
+                Some(GREY),
+                "지도 프로그램",
+                "이 운영체제에서는 지원하지 않음".into(),
+            )
+        } else if m.installed {
+            kv(
+                Some(GREEN),
+                "지도 프로그램",
+                "있음 (Organic Maps 사용성 개선판)".into(),
+            )
+        } else {
+            kv(Some(GREY), "지도 프로그램", "없음".into())
+        },
+        kv(
+            None,
+            "지도 파일",
+            m.version
+                .map(|v| format!("대한민국 {v}판"))
+                .unwrap_or_else(|| "없음".into()),
+        ),
+        if m.cpu {
+            kv(
+                Some(YELLOW),
+                "그리기",
+                "CPU 렌더링 (그래픽 드라이버 문제 기록)".into(),
+            )
+        } else {
+            kv(Some(GREEN), "그리기", "그래픽 카드".into())
+        },
+        kv(Some(GREEN), "인터넷", "쓰지 않음 (오프라인 모드)".into()),
+    ];
+    if m.cpu {
         map.push(Button("[g Use graphics card]".into(), 17));
     }
 
+    // Info
     let app_dir = data
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| data.clone());
     let info = vec![
-        Text(format!(
-            "Korea SOS Atlas Kit v{}",
-            env!("CARGO_PKG_VERSION")
-        )),
-        Text(format!("위치: {}", layout::plain(app_dir).display())),
-        Text("구조 요청 서비스가 아닙니다. 위급할 때는 119·112에 먼저 연락하세요.".into()),
+        kv(
+            None,
+            "버전",
+            format!("Korea SOS Atlas Kit v{}", env!("CARGO_PKG_VERSION")),
+        ),
+        kv(None, "위치", layout::plain(app_dir).display().to_string()),
+        Note("구조 요청 서비스가 아닙니다. 위급할 때는 119·112에 먼저 연락하세요.".into()),
         // One link per line so terminals can detect and open each address.
-        Text("Map data © OpenStreetMap and Organic Maps".into()),
-        Text("https://organicmaps.app".into()),
-        Text("https://openstreetmap.org/copyright".into()),
-        Text("라이선스: LICENSING.md, LICENSES 폴더".into()),
-        Text("자료별 조건과 지킨 방법: LICENSES/CONTENT.md".into()),
+        Note("Map data © OpenStreetMap and Organic Maps".into()),
+        Note("https://organicmaps.app".into()),
+        Note("https://openstreetmap.org/copyright".into()),
+        Note("라이선스: LICENSING.md · LICENSES/CONTENT.md".into()),
         Button("[l Open licenses folder]".into(), 18),
     ];
     vec![
+        Section {
+            title: " AI ",
+            color: YELLOW,
+            lines: ai,
+        },
+        Section {
+            title: " Memory ",
+            color: 51,
+            lines: memory,
+        },
         Section {
             title: " Content ",
             color: 51,
             lines: content_lines,
         },
         Section {
-            title: " AI ",
-            color: 226,
-            lines: ai,
-        },
-        Section {
             title: " Map ",
-            color: 46,
+            color: GREEN,
             lines: map,
         },
         Section {
             title: " Info ",
-            color: 244,
+            color: GREY,
             lines: info,
         },
     ]
@@ -821,25 +962,25 @@ fn status_sections(content: &Path, docs: &[Doc], engine: &ai_runtime::Controller
 fn draw_status(f: &mut Frame, a: &mut App, w: u16, h: u16) {
     let normal = style(None);
     let muted = normal.fg(Color::Indexed(244));
+    let cell = |c: u8| normal.bg(Color::Indexed(c));
     put(
         f,
         2,
         1,
-        "이 키트에 무엇이 들어 있는지, AI와 지도가 어떤 상태인지 보여 줍니다. [ ] 단추는 누를 수 있습니다.",
+        "키트 상태 · 1초마다 갱신 · [ ] 단추는 누를 수 있습니다.",
         w - 2,
         muted,
     );
     put(f, 3, 0, &"─".repeat(w as usize - 1), w, muted);
     a.status_buttons.clear();
     let half = w / 2;
-    let columns = [(2u16, half - 3), (half + 2, w - half - 4)];
-    let (mut col, mut y) = (0usize, 5u16);
+    let columns = [(2u16, half - 4), (half + 2, w - half - 4)];
+    let mut ys = [5u16, 5u16];
+    let bottom = h - 1;
     for (i, section) in a.status.iter().enumerate() {
-        if i == 2 {
-            col = 1;
-            y = 5;
-        }
+        let col = i % 2;
         let (x, width) = columns[col];
+        let mut y = ys[col];
         put(
             f,
             y,
@@ -849,28 +990,80 @@ fn draw_status(f: &mut Frame, a: &mut App, w: u16, h: u16) {
             style(Some(section.color)),
         );
         y += 2;
+        let key_w = section
+            .lines
+            .iter()
+            .filter_map(|l| match l {
+                StatusLine::Kv(_, k, _) => Some(str_width(k)),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0);
         for line in &section.lines {
             match line {
-                StatusLine::Text(t) => {
-                    // Bulleted; wrapped lines are indented under the text.
-                    for (k, part) in wrap(t, width.saturating_sub(2) as usize).iter().enumerate() {
-                        if y < h - 1 {
-                            put(f, y, x, if k == 0 { "-" } else { " " }, 1, muted);
-                            put(f, y, x + 2, part, width - 2, normal);
+                StatusLine::Note(t) => {
+                    let nw = width.saturating_sub(2);
+                    for part in wrap(t, nw as usize) {
+                        if y < bottom {
+                            put(f, y, x + 2, &part, nw, muted);
                         }
                         y += 1;
                     }
                 }
+                StatusLine::Kv(color, k, v) => {
+                    let vx = x + 2 + key_w + 2;
+                    let vw = (x + width).saturating_sub(vx).max(1);
+                    let vst = match color {
+                        Some(c) if *c == GREY => muted,
+                        Some(c) => normal.fg(Color::Indexed(*c)).add_modifier(Modifier::BOLD),
+                        None => normal,
+                    };
+                    for (n, part) in wrap(v, vw as usize).iter().enumerate() {
+                        if y < bottom {
+                            if n == 0 {
+                                put(f, y, x + 2, k, key_w, muted);
+                            }
+                            put(f, y, vx, part, vw, vst);
+                        }
+                        y += 1;
+                    }
+                }
+                StatusLine::Bar(fraction, color, marks) => {
+                    let x = x + 2;
+                    let bw = width.saturating_sub(4).max(10);
+                    let filled = ((fraction.clamp(0.0, 1.0)) * bw as f64).round() as u16;
+                    if y + 1 < bottom {
+                        for c in 0..bw {
+                            let st = if c < filled { cell(*color) } else { cell(236) };
+                            put(f, y, x + c, " ", 1, st);
+                        }
+                        for (frac, label) in marks {
+                            let at = (frac.clamp(0.0, 1.0) * bw as f64).round() as u16;
+                            put(f, y + 1, x + at.min(bw - 1), &format!("^{label}"), 8, muted);
+                        }
+                    }
+                    y += 2;
+                }
+                StatusLine::Strip(colors) => {
+                    let sw = width.saturating_sub(4) as usize;
+                    let shown = &colors[colors.len().saturating_sub(sw)..];
+                    if y < bottom {
+                        for (c, color) in shown.iter().enumerate() {
+                            put(f, y, x + 2 + c as u16, " ", 1, cell(*color));
+                        }
+                    }
+                    y += 2;
+                }
                 StatusLine::Button(label, kind) => {
-                    if y < h - 1 {
-                        put(f, y, x, label, str_width(label), normal);
-                        a.status_buttons.push((x, y, str_width(label), *kind));
+                    if y < bottom {
+                        put(f, y, x + 2, label, str_width(label), normal);
+                        a.status_buttons.push((x + 2, y, str_width(label), *kind));
                     }
                     y += 1;
                 }
             }
         }
-        y += 1;
+        ys[col] = y + 1;
     }
 }
 fn geometry(w: u16, h: u16, view: u8) -> (u16, u16, u16, u16) {
@@ -1704,6 +1897,7 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
     let mut engine = ai_runtime::Controller::new(root, corpus);
     let mut dirty = true;
     let mut ai_raw = String::new();
+    let mut last_sample = Instant::now() - Duration::from_secs(2);
     loop {
         if state.is_none() {
             if engine.poll() {
@@ -1746,6 +1940,20 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
                 dirty = true
             }
         }
+        // Sample available memory once a second for the Status chart; the
+        // Status view redraws with each sample.
+        if last_sample.elapsed() >= Duration::from_secs(1) {
+            last_sample = Instant::now();
+            if let Some(kb) = ai_runtime::available_memory_kib() {
+                a.mem_history.push_back(kb);
+                while a.mem_history.len() > 60 {
+                    a.mem_history.pop_front();
+                }
+            }
+            if a.view == 2 {
+                dirty = true;
+            }
+        }
         if !dirty && !event::poll(Duration::from_millis(100))? {
             continue;
         }
@@ -1757,7 +1965,7 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
         };
         a.selected = a.selected.min(rows.len().saturating_sub(1));
         if a.view == 2 {
-            a.status = status_sections(pdf, docs, &engine);
+            a.status = status_sections(pdf, docs, &engine, &a.mem_history);
         }
         if dirty {
             t.draw(|f| {
