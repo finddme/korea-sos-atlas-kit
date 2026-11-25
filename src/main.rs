@@ -716,11 +716,9 @@ fn status_sections(content: &Path, docs: &[Doc], engine: &ai_runtime::Controller
                 }
             )));
         }
-        // Explain the state here too: the low-memory question and refusals are
-        // otherwise only visible in the AI pane.
+        // Read-only: turning AI on or off is done in the AI pane ([2] / p).
         let phase = engine.status.phase.as_str();
         let detail = engine.status.text.replace('\n', " ");
-        // The question's own key hint is shown as buttons below.
         let detail = detail
             .split("[Enter")
             .next()
@@ -733,15 +731,28 @@ fn status_sections(content: &Path, docs: &[Doc], engine: &ai_runtime::Controller
             "STARTING" => "상태: 켜는 중".into(),
             "SEARCHING" | "ANSWERING" => "상태: 답변 중".into(),
             "STOPPING" => "상태: 끄는 중".into(),
-            "CONFIRM_MEMORY" => format!("상태: 켤지 묻는 중 — {detail}"),
-            "ERROR" => format!("상태: 켜지 못함 — {detail}"),
+            "CONFIRM_MEMORY" => format!("상태: 켤지 묻는 중 (AI 칸에서 Enter/Esc) — {detail}"),
+            "ERROR" => format!("상태: 켜지 못했거나 멈춤 — {detail}"),
             other => format!("상태: {other}"),
         }));
+        // Checked against the real process, so "종료됨" means the memory is free.
+        ai.push(Text(match ai_runtime::engine_process() {
+            Some((pid, mem)) => format!(
+                "AI 엔진: 실행 중 (프로세스 {pid}{})",
+                mem.map(|m| format!(" · 메모리 {} 사용", ai_runtime::gib(m)))
+                    .unwrap_or_default()
+            ),
+            None => "AI 엔진: 종료됨 — 모델이 메모리에 올라가 있지 않습니다".into(),
+        }));
         let mem = ai_runtime::available_memory_kib();
-        let level = match ai_runtime::memory_level(mem) {
-            ai_runtime::MemoryLevel::Enough => "바로 켤 수 있습니다",
-            ai_runtime::MemoryLevel::Low(_) => "켤 때 느려질 수 있다고 확인을 묻습니다",
-            ai_runtime::MemoryLevel::TooLow(_) => "메모리가 부족해 켤 수 없습니다",
+        let running = ai_runtime::engine_process().is_some();
+        let level = match (running, ai_runtime::memory_level(mem)) {
+            (true, _) => "AI가 켜져 있는 동안의 값",
+            (false, ai_runtime::MemoryLevel::Enough) => "지금 켜면 바로 켜집니다",
+            (false, ai_runtime::MemoryLevel::Low(_)) => {
+                "지금 켜면 느려질 수 있다고 확인을 묻습니다"
+            }
+            (false, ai_runtime::MemoryLevel::TooLow(_)) => "지금은 메모리가 부족해 켤 수 없습니다",
         };
         ai.push(Text(format!(
             "사용 가능한 메모리: {} — {level}",
@@ -753,13 +764,9 @@ fn status_sections(content: &Path, docs: &[Doc], engine: &ai_runtime::Controller
             ai_runtime::gib(ai_runtime::MEMORY_RECOMMENDED_KIB),
             ai_runtime::gib(ai_runtime::MEMORY_MINIMUM_KIB)
         )));
-        ai.push(Text("인터넷을 쓰지 않고 이 PC 안에서만 동작합니다.".into()));
-        if phase == "CONFIRM_MEMORY" {
-            ai.push(Button("[Enter 그래도 켜기]".into(), 12));
-            ai.push(Button("[Esc 취소]".into(), 13));
-        } else {
-            ai.push(Button("[p AI on/off]".into(), 16));
-        }
+        ai.push(Text(
+            "켜기·끄기: [2 Show AI] 칸에서 p · 인터넷을 쓰지 않습니다".into(),
+        ));
     }
 
     let (map_lines, cpu) = maps::status(content);

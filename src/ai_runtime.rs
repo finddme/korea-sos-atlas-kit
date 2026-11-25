@@ -298,6 +298,34 @@ mod job {
         pub(super) fn GlobalMemoryStatusEx(status: *mut MemoryStatus) -> i32;
         fn OpenProcess(access: u32, inherit: i32, pid: u32) -> Handle;
         fn GetExitCodeProcess(process: Handle, code: *mut u32) -> i32;
+        fn K32GetProcessMemoryInfo(process: Handle, counters: *mut MemoryCounters, cb: u32) -> i32;
+    }
+    #[repr(C)]
+    #[derive(Default)]
+    struct MemoryCounters {
+        cb: u32,
+        page_faults: u32,
+        peak_working_set: usize,
+        working_set: usize,
+        rest: [usize; 6],
+    }
+    /// Working set of a process in KiB.
+    pub(super) fn process_memory_kib(pid: u32) -> Option<u64> {
+        const QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+        const VM_READ: u32 = 0x0010;
+        unsafe {
+            let h = OpenProcess(QUERY_LIMITED_INFORMATION | VM_READ, 0, pid);
+            if h.is_null() {
+                return None;
+            }
+            let mut c = MemoryCounters {
+                cb: std::mem::size_of::<MemoryCounters>() as u32,
+                ..Default::default()
+            };
+            let ok = K32GetProcessMemoryInfo(h, &mut c, c.cb) != 0;
+            CloseHandle(h);
+            ok.then_some(c.working_set as u64 / 1024)
+        }
     }
     pub(super) fn process_alive(pid: u32) -> bool {
         const QUERY_LIMITED_INFORMATION: u32 = 0x1000;
@@ -353,6 +381,12 @@ mod job {
 #[cfg(not(windows))]
 mod job {
     pub(super) struct Job;
+    /// Resident memory of a process in KiB (Linux /proc).
+    pub(super) fn process_memory_kib(pid: u32) -> Option<u64> {
+        let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+        let line = status.lines().find(|l| l.starts_with("VmRSS:"))?;
+        line.split_whitespace().nth(1)?.parse().ok()
+    }
     #[cfg(unix)]
     pub(super) fn process_alive(pid: u32) -> bool {
         // Never pass 0 or a negative value: kill() would address a process group.
@@ -365,6 +399,18 @@ mod job {
         let r = unsafe { libc::kill(pid, 0) };
         r == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
     }
+}
+
+/// The running engine's process id (0 when none), for the Status view.
+static ENGINE_PID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// The engine process if it is running: (process id, memory in KiB).
+pub fn engine_process() -> Option<(u32, Option<u64>)> {
+    let pid = ENGINE_PID.load(Ordering::Acquire);
+    #[cfg(any(windows, unix))]
+    let alive = pid != 0 && job::process_alive(pid);
+    #[cfg(not(any(windows, unix)))]
+    let alive = pid != 0;
+    alive.then(|| (pid, job::process_memory_kib(pid)))
 }
 
 /// Removes `sos-ai-<pid>-<port>` scratch folders (question, answer, engine log)
@@ -455,6 +501,7 @@ impl Drop for OwnedChild {
         }
         let _ = self.0.kill();
         let _ = self.0.wait();
+        let _ = ENGINE_PID.compare_exchange(self.0.id(), 0, Ordering::AcqRel, Ordering::Acquire);
     }
 }
 struct Scratch(PathBuf);
@@ -971,6 +1018,7 @@ fn serve(
             .stderr(log),
     )
     .map_err(|e| format!("Start failed: {e}"))?;
+    ENGINE_PID.store(server.0.id(), Ordering::Release);
     let client = Client {
         url: format!("http://127.0.0.1:{port}"),
         dir: &scratch.0,
