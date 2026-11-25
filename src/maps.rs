@@ -283,9 +283,10 @@ fn windows_command(root: &Path, dir: &Path) -> Result<(Command, PathBuf), Error>
     Ok((cmd, log))
 }
 
-/// Windows: once the viewer has crashed at start-up (no usable graphics driver or
-/// a too-old OpenGL), later launches render on the CPU with Qt's bundled
-/// opengl32sw.dll. Deleting this file retries the graphics card.
+/// Windows: once the viewer has exited abnormally at start-up (it exits with 75
+/// when there is no usable OpenGL 3.2, e.g. no graphics driver), later launches
+/// render on the CPU with the bundled Mesa llvmpipe (runtime/.../mesa).
+/// Deleting this file retries the graphics card.
 const SOFTWARE_GL_MARKER: &str = "opengl-software";
 /// An abnormal exit within this time counts as a start-up crash.
 const STARTUP_CRASH_WINDOW: Duration = Duration::from_secs(20);
@@ -293,7 +294,8 @@ const STARTUP_CRASH_WINDOW: Duration = Duration::from_secs(20);
 fn spawn_viewer(root: &Path, software: bool) -> Result<(std::process::Child, PathBuf), Error> {
     let (mut cmd, log) = command(root)?;
     if software {
-        cmd.env("QT_OPENGL", "software");
+        // The patched viewer loads mesa/opengl32.dll (qt/main.cpp, LoadAtlasSoftwareGL).
+        cmd.env("SOS_ATLAS_SOFTWARE_GL", "1");
     }
     Ok((cmd.spawn()?, log))
 }

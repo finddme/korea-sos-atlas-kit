@@ -86,7 +86,7 @@ index 1ce5c486d9..7f6728f9de 100644
    if (FAILED(::SHGetFolderPathA(nullptr, CSIDL_LOCAL_APPDATA, nullptr, SHGFP_TYPE_CURRENT, pathBuf)))
      return false;
 diff --git a/qt/CMakeLists.txt b/qt/CMakeLists.txt
-index ae3cedbfc0..946b4f8a35 100644
+index ae3cedbfc0..900b6ef035 100644
 --- a/qt/CMakeLists.txt
 +++ b/qt/CMakeLists.txt
 @@ -1,8 +1,11 @@
@@ -101,6 +101,18 @@ index ae3cedbfc0..946b4f8a35 100644
    about.cpp
    about.hpp
    bookmark_dialog.cpp
+@@ -197,6 +200,11 @@ if (PLATFORM_WIN)
+   if (NOT OMIM_WINDOWS_DISTRIBUTION STREQUAL "development")
+     set_target_properties(${PROJECT_NAME} PROPERTIES WIN32_EXECUTABLE ON)
+   endif()
++
++  # Korea SOS Atlas Kit: delay-load opengl32.dll so that CPU rendering can load
++  # Mesa under that name first (qt/main.cpp, LoadAtlasSoftwareGL).
++  target_link_options(${PROJECT_NAME} PRIVATE "/DELAYLOAD:opengl32.dll")
++  target_link_libraries(${PROJECT_NAME} PRIVATE delayimp)
+ endif()
+ 
+ if (PLATFORM_WIN AND NOT OMIM_WINDOWS_DISTRIBUTION STREQUAL "development")
 diff --git a/qt/about.cpp b/qt/about.cpp
 index 748fd0bbb4..476786e769 100644
 --- a/qt/about.cpp
@@ -681,11 +693,50 @@ index 385b445eae..46853a9aaf 100644
  
  void DrawWidget::RouteAlongTrack(kml::TrackId trackId)
 diff --git a/qt/main.cpp b/qt/main.cpp
-index 499cb5bd19..64f04d776c 100644
+index 499cb5bd19..a900a6496f 100644
 --- a/qt/main.cpp
 +++ b/qt/main.cpp
-@@ -89,7 +89,8 @@ bool const g_logAbortLevelDummy = gflags::RegisterFlagValidator(&FLAGS_log_abort
+@@ -37,8 +37,10 @@
+ #include <QtCore/QFile>
+ #include <QtCore/QFileInfo>
+ #include <QtCore/QTemporaryFile>
++#include <QtCore/qt_windows.h>
+ 
+ #include <cstdio>
++#include <string>
+ #endif
+ 
+ DEFINE_string(data_path, "", "Path to data directory.");
+@@ -87,9 +89,36 @@ bool ValidateLogAbortLevel(char const * flagname, std::string const & value)
+ bool const g_logAbortLevelDummy = gflags::RegisterFlagValidator(&FLAGS_log_abort_level, &ValidateLogAbortLevel);
+ 
  #ifdef OMIM_OS_WINDOWS
++// Korea SOS Atlas Kit: CPU rendering for PCs without a usable graphics driver.
++// drape calls opengl32.dll directly, so Qt's opengl32sw.dll cannot serve it: the
++// map stays white. Instead Mesa llvmpipe is loaded from <exe dir>\mesa under the
++// module name opengl32.dll before anything binds it (opengl32.dll is delay-loaded,
++// see qt/CMakeLists.txt). drape and Qt (QT_OPENGL=desktop) then both use it.
++enum class AtlasSoftwareGL { Off, Loaded, Failed, TooLate };
++
++AtlasSoftwareGL LoadAtlasSoftwareGL()
++{
++  if (qEnvironmentVariableIntValue("SOS_ATLAS_SOFTWARE_GL") != 1)
++    return AtlasSoftwareGL::Off;
++  if (::GetModuleHandleW(L"opengl32.dll") != nullptr)
++    return AtlasSoftwareGL::TooLate;
++  wchar_t exe[MAX_PATH];
++  DWORD const n = ::GetModuleFileNameW(nullptr, exe, MAX_PATH);
++  if (n == 0 || n >= MAX_PATH)
++    return AtlasSoftwareGL::Failed;
++  std::wstring path(exe, n);
++  path.resize(path.find_last_of(L"\\/") + 1);
++  path += L"mesa\\opengl32.dll";
++  if (::LoadLibraryExW(path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH) == nullptr)
++    return AtlasSoftwareGL::Failed;
++  qputenv("QT_OPENGL", "desktop");
++  return AtlasSoftwareGL::Loaded;
++}
++
  void InitializeWindowsLogging(Platform const & platform)
  {
 -  QDir const logDir(QString::fromStdString(platform.WritablePathForFile("logs")));
@@ -694,6 +745,31 @@ index 499cb5bd19..64f04d776c 100644
    if (!QDir().mkpath(logDir.path()))
      return;
  
+@@ -133,6 +162,11 @@ int main(int argc, char * argv[])
+   // See http://dbaron.org/log/20121222-locale for more details.
+   std::setlocale(LC_NUMERIC, "C");
+ 
++#ifdef OMIM_OS_WINDOWS
++  // Before any OpenGL call, so that opengl32.dll resolves to Mesa in CPU mode.
++  auto const softwareGL = LoadAtlasSoftwareGL();
++#endif
++
+ #ifdef OMIM_OS_LINUX
+   platform::EnableDesktopDataMigration();
+ #endif
+@@ -159,6 +193,12 @@ int main(int argc, char * argv[])
+ 
+ #ifdef OMIM_OS_WINDOWS
+   InitializeWindowsLogging(platform);
++  if (softwareGL == AtlasSoftwareGL::Loaded)
++    LOG(LINFO, ("CPU rendering: Mesa llvmpipe loaded as opengl32.dll"));
++  else if (softwareGL == AtlasSoftwareGL::Failed)
++    LOG(LWARNING, ("CPU rendering requested, but mesa\\opengl32.dll could not be loaded"));
++  else if (softwareGL == AtlasSoftwareGL::TooLate)
++    LOG(LWARNING, ("CPU rendering requested, but the system opengl32.dll was already loaded"));
+ #endif
+ 
+   LOG(LINFO, ("Organic Maps", platform.Version(), "built with QT:", QT_VERSION_STR, "runtime QT:", qVersion(),
 diff --git a/qt/mainwindow.cpp b/qt/mainwindow.cpp
 index e027743149..be050061f9 100644
 --- a/qt/mainwindow.cpp
@@ -987,6 +1063,45 @@ index 9ca9f4667e..4987b5b9eb 100644
      }
  
      // Wikipedia fragment
+diff --git a/qt/qt_common/map_widget.cpp b/qt/qt_common/map_widget.cpp
+index 62f5b51d90..82f1ff4251 100644
+--- a/qt/qt_common/map_widget.cpp
++++ b/qt/qt_common/map_widget.cpp
+@@ -13,6 +13,8 @@
+ 
+ #include <algorithm>
+ #include <cmath>
++#include <cstdio>
++#include <cstdlib>
+ #include <functional>
+ #include <string>
+ 
+@@ -468,6 +470,25 @@ void MapWidget::initializeGL()
+   }
+ #endif
+ 
++#if defined(OMIM_OS_WINDOWS)
++  // Korea SOS Atlas Kit: drape calls opengl32.dll directly. When that library has no
++  // current context (Qt chose its own opengl32sw.dll) or offers less than OpenGL 3.2
++  // (no graphics driver), nothing would be drawn. Exit with code 75 instead, so that
++  // the kit reopens the viewer with CPU rendering (SOS_ATLAS_SOFTWARE_GL, qt/main.cpp).
++  {
++    auto const * version = reinterpret_cast<char const *>(::glGetString(GL_VERSION));
++    auto const * renderer = reinterpret_cast<char const *>(::glGetString(GL_RENDERER));
++    LOG(LINFO, ("opengl32.dll context:", version ? version : "(none)", "|", renderer ? renderer : "(none)"));
++    int major = 0, minor = 0;
++    if (version == nullptr || std::sscanf(version, "%d.%d", &major, &minor) != 2 || major * 10 + minor < 32)
++    {
++      LOG(LWARNING, ("No usable OpenGL 3.2 context; exiting (75) for CPU rendering"));
++      std::fflush(stderr);
++      std::_Exit(75);
++    }
++  }
++#endif
++
+   m_contextFactory.reset(new QtOGLContextFactory(context()));
+ 
+   emit BeforeEngineCreation();
 diff --git a/qt/res/resources.qrc b/qt/res/resources.qrc
 index fcba6ad092..dbadda2637 100644
 --- a/qt/res/resources.qrc
