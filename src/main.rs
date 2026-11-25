@@ -435,14 +435,8 @@ fn ai_buttons(phase: &str, sources: usize, asked: bool, shown: usize) -> Vec<(u1
     };
     if sources > 0 {
         // One source opens per press; the label shows which one is open.
-        labels.push((
-            if shown == 0 {
-                format!("[s 근거 원문 모아 보기 · {sources}건]")
-            } else {
-                format!("[s 다음 근거로 · {shown}/{sources}]")
-            },
-            10,
-        ));
+        let _ = shown;
+        labels.push((format!("[s 근거 원문 보기 · {sources}건]"), 10));
     }
     if asked && matches!(phase, "READY" | "OFF" | "ERROR") {
         labels.push(("[c 답변 복사]".into(), 11));
@@ -546,6 +540,103 @@ fn tabs(view: u8) -> Vec<(u16, String)> {
             a
         })
         .collect()
+}
+/// The key hint line. Every entry with a key can also be clicked; the click is
+/// handled as that key press, so keyboard and mouse share one code path.
+fn hints(editing: bool) -> Vec<(&'static str, Option<KeyCode>)> {
+    if editing {
+        vec![
+            ("Search:", None),
+            ("[Enter] Apply", Some(KeyCode::Enter)),
+            ("[Esc] Cancel", Some(KeyCode::Esc)),
+            ("[Backspace] Delete", Some(KeyCode::Backspace)),
+            ("· Empty input clears filter", None),
+        ]
+    } else {
+        vec![
+            ("[/] Search", Some(KeyCode::Char('/'))),
+            ("[Tab] Category", Some(KeyCode::Tab)),
+            ("[↑↓] Select", None),
+            ("[Enter] Open", Some(KeyCode::Enter)),
+            ("[PgUp/Dn] Read", Some(KeyCode::PageDown)),
+            ("[o] Source", Some(KeyCode::Char('o'))),
+            ("[i] Info", Some(KeyCode::Char('i'))),
+            ("[c] Copy", Some(KeyCode::Char('c'))),
+            ("[q] Quit", Some(KeyCode::Char('q'))),
+        ]
+    }
+}
+fn hint_text(editing: bool) -> String {
+    hints(editing)
+        .iter()
+        .map(|(t, _)| *t)
+        .collect::<Vec<_>>()
+        .join("  ")
+}
+fn hint_row(w: u16) -> u16 {
+    if w >= 115 {
+        2
+    } else {
+        3
+    }
+}
+/// The key a click on the hint line stands for.
+fn hint_hit(x: u16, y: u16, w: u16, h: u16, editing: bool) -> Option<KeyCode> {
+    if w < 90 || h < 24 || y != hint_row(w) || x < 1 {
+        return None;
+    }
+    let mut at = 1;
+    for (t, key) in hints(editing) {
+        let width = str_width(t);
+        if x >= at && x < at + width {
+            return key;
+        }
+        at += width + 2;
+    }
+    None
+}
+/// Numbered tabs for the AI source collection, right-aligned on the left
+/// pane's bottom row: (x, label).
+fn source_tabs(n: usize, w: u16, view: u8) -> Vec<(u16, String)> {
+    let (_, half, _, _) = geometry(w, 30, view);
+    // Left pane bottom row: [Close document] [Source file] [Info] end at 42.
+    let (left, right) = (43, 2 + (if view == 1 { half } else { w }) - 5);
+    let labels: Vec<String> = (1..=n).map(|k| format!("[{k}]")).collect();
+    let width: u16 = labels.iter().map(|l| str_width(l)).sum();
+    let gap = if width + n as u16 <= right.saturating_sub(left) {
+        1
+    } else {
+        0
+    };
+    let mut x = right.saturating_sub(width + gap * n as u16).max(left);
+    let mut out = Vec::new();
+    for l in labels {
+        if x + str_width(&l) > right {
+            break;
+        }
+        let at = x;
+        x += str_width(&l) + gap;
+        out.push((at, l));
+    }
+    out
+}
+/// Show source k of the AI source collection.
+fn show_source(a: &mut App, docs: &[Doc], k: usize) {
+    let n = a.collection.len();
+    if n == 0 {
+        return;
+    }
+    let k = k.min(n - 1);
+    a.offset = a.collection_starts.get(k).copied().unwrap_or(0);
+    a.ai_source_shown = k + 1;
+    a.opened = Some(a.collection[k]);
+    a.collection_opened = a.opened;
+    a.notice = format!(
+        "근거 원문 [{}]/{} · {}",
+        k + 1,
+        n,
+        docs[a.collection[k]].title
+    );
 }
 fn geometry(w: u16, h: u16, view: u8) -> (u16, u16, u16, u16) {
     (
@@ -690,11 +781,7 @@ fn draw(f: &mut Frame, a: &mut App, docs: &[Doc], rows: &[usize], ai: &Ai, bench
         f,
         if w >= 115 { 2 } else { 3 },
         1,
-        if a.editing {
-            "Search: [Enter] Apply  [Esc] Cancel  [Backspace] Delete · Empty input clears filter"
-        } else {
-            "[/] Search  [Tab] Category  [↑↓] Select  [Enter] Open  [PgUp/Dn] Read  [o] Source  [i] Info  [c] Copy  [q] Quit"
-        },
+        &hint_text(a.editing),
         w - 3,
         muted,
     );
@@ -863,6 +950,14 @@ fn draw(f: &mut Frame, a: &mut App, docs: &[Doc], rows: &[usize], ai: &Ai, bench
         }
         put(f, bottom - 1, 20, "[Source file]", 15, normal);
         put(f, bottom - 1, 36, "[Info]", 6, normal);
+        for (k, (x, label)) in source_tabs(n, w, a.view).into_iter().enumerate() {
+            let st = if k == current {
+                style(Some(51))
+            } else {
+                normal
+            };
+            put(f, bottom - 1, x, &label, str_width(&label), st);
+        }
     } else if let Some(i) = a.opened {
         let d = &docs[i];
         put(
@@ -1070,6 +1165,16 @@ fn hit(x: u16, y: u16, w: u16, h: u16, a: &App, count: usize) -> Option<(u8, usi
     let start = a.selected / page * page;
     if (6..split - 1).contains(&y) && x > edge && x < w - 2 && start + ((y - 6) as usize) < count {
         return Some((3, start + (y - 6) as usize));
+    }
+    if y == bottom - 1 && !a.collection.is_empty() {
+        for (k, (at, label)) in source_tabs(a.collection.len(), w, a.view)
+            .iter()
+            .enumerate()
+        {
+            if x >= *at && x < at + str_width(label) {
+                return Some((14, k));
+            }
+        }
     }
     if y == bottom - 1 {
         if (44..64).contains(&x) {
@@ -1324,28 +1429,10 @@ fn open_ai_source(a: &mut App, docs: &[Doc], ids: &[String]) {
         a.collection_opened = a.opened;
         a.offset = 0;
         a.ai_source_shown = 1;
-        a.notice = format!(
-            "근거 원문 {}건을 왼쪽에 모았습니다. 스크롤해서 읽고, [s]를 누르면 다음 자료로 건너뜁니다.",
-            a.collection.len()
-        );
-        return;
     }
-    let n = a.collection.len();
-    let current = a
-        .collection_starts
-        .iter()
-        .rposition(|s| *s <= a.offset)
-        .unwrap_or(0);
-    let next = (current + 1) % n;
-    a.offset = a.collection_starts.get(next).copied().unwrap_or(0);
-    a.ai_source_shown = next + 1;
-    a.opened = Some(a.collection[next]);
-    a.collection_opened = a.opened;
     a.notice = format!(
-        "근거 원문 {}/{} · {}",
-        next + 1,
-        n,
-        docs[a.collection[next]].title
+        "근거 원문 {}건을 왼쪽에 모았습니다. 왼쪽 아래 [1] [2]… 를 누르거나 ←/→로 원문을 옮겨 봅니다.",
+        a.collection.len()
     );
 }
 fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
@@ -1424,7 +1511,20 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
         if !event::poll(Duration::from_millis(100))? {
             continue;
         }
-        match event::read()? {
+        let mut ev = event::read()?;
+        if let Event::Mouse(m) = &ev {
+            if m.kind == MouseEventKind::Down(MouseButton::Left) {
+                let (w, h) = crossterm::terminal::size()?;
+                if let Some(code) = hint_hit(m.column, m.row, w, h, a.editing) {
+                    a.ai_editing = false;
+                    ev = Event::Key(crossterm::event::KeyEvent::new(
+                        code,
+                        crossterm::event::KeyModifiers::NONE,
+                    ));
+                }
+            }
+        }
+        match ev {
             Event::Resize(_, _) => dirty = true,
             Event::Key(mut k)
                 if k.kind == KeyEventKind::Press || k.kind == KeyEventKind::Repeat =>
@@ -1530,6 +1630,14 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
                             a.selected = 0;
                             a.opened = None
                         }
+                        KeyCode::Right if !a.collection.is_empty() => {
+                            let next = a.ai_source_shown.min(a.collection.len() - 1);
+                            show_source(&mut a, docs, next);
+                        }
+                        KeyCode::Left if !a.collection.is_empty() => {
+                            let prev = a.ai_source_shown.saturating_sub(2);
+                            show_source(&mut a, docs, prev);
+                        }
                         KeyCode::Down => {
                             a.selected = (a.selected + 1).min(rows.len().saturating_sub(1))
                         }
@@ -1580,11 +1688,12 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
                 match m.kind {
                     MouseEventKind::Down(MouseButton::Left) => {
                         if let Some((kind, n)) = target {
-                            if !matches!(kind, 8..=13) {
+                            if !matches!(kind, 8..=14) {
                                 a.ai_editing = false;
                             }
                             match kind {
                                 11 => copy_current(&mut a, docs, &ai_raw),
+                                14 => show_source(&mut a, docs, n),
                                 12 => {
                                     engine.confirm_low_memory();
                                     a.notice.clear();
@@ -1830,11 +1939,40 @@ mod tests {
                 .iter()
                 .map(|c| c.symbol())
                 .collect::<String>();
-            assert!(text.replace(' ', "").contains("[s다음근거로·"));
+            assert!(text.replace(' ', "").contains("[s근거원문보기·1건]"));
+            assert!(text.contains("[1]"));
             assert!(text.replace(' ', "").contains("답변또는오류안내"));
         }
         open_ai_source(&mut a, &docs, &[]);
         assert!(a.notice.contains("일반 검색"));
+    }
+
+    #[test]
+    fn hint_line_and_source_tabs_are_clickable() {
+        // Hint line: each entry maps to its key; plain text does not.
+        let row = hint_row(120);
+        assert_eq!(hint_hit(1, row, 120, 30, false), Some(KeyCode::Char('/')));
+        let x = hint_text(false).find("[Tab]").unwrap() as u16 + 1;
+        assert_eq!(hint_hit(x, row, 120, 30, false), Some(KeyCode::Tab));
+        let x = str_width(&hint_text(false)[..hint_text(false).find("[↑↓]").unwrap()]) + 1;
+        assert_eq!(hint_hit(x, row, 120, 30, false), None);
+        assert_eq!(hint_hit(1, row, 120, 30, true), None);
+        assert_eq!(hint_hit(10, row, 120, 30, true), Some(KeyCode::Enter));
+        assert_eq!(hint_hit(1, row + 1, 120, 30, false), None);
+        // Source tabs: [1] [2] [3] right-aligned on the left pane, clear of [Info].
+        let tabs = source_tabs(3, 120, 1);
+        assert_eq!(
+            tabs.iter().map(|t| t.1.as_str()).collect::<Vec<_>>(),
+            ["[1]", "[2]", "[3]"]
+        );
+        assert!(tabs[0].0 >= 43 && tabs[2].0 + 3 <= 2 + 60 - 5);
+        let a = App {
+            view: 1,
+            collection: vec![0, 1, 2],
+            ..App::default()
+        };
+        let (_, _, _, bottom) = geometry(120, 30, 1);
+        assert_eq!(hit(tabs[1].0, bottom - 1, 120, 30, &a, 3), Some((14, 1)));
     }
 
     #[test]

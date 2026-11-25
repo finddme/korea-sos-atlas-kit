@@ -1002,7 +1002,7 @@ fn serve(
         }
         thread::sleep(Duration::from_millis(100));
     }
-    let _=updates.send(Update::new("READY",format!("{} 준비됨. 위 질문칸에 질문을 입력하고 Enter를 누르세요.\nAI 답변은 틀릴 수 있습니다. 답변 아래 근거 원문을 꼭 확인하세요.",model.file_name().unwrap_or_default().to_string_lossy())));
+    let _=updates.send(Update::new("READY",format!("{} 준비됨. 위 질문칸에 질문을 입력하고 Enter를 누르세요.\nAI 답변은 틀릴 수 있습니다. 답변창 하단의 [근거 원문 보기]로 원문을 꼭 확인하세요.",model.file_name().unwrap_or_default().to_string_lossy())));
     while !cancel.load(Ordering::Acquire) {
         if server.0.try_wait().map_err(|e| e.to_string())?.is_some() {
             return Err(fail(
@@ -1240,7 +1240,7 @@ fn answer(
     }
     let _ = updates.send(Update::new(
         "ANSWERING",
-        "근거에서 답변 생성 중… [p] AI OFF로 취소할 수 있습니다.\n\n※ 이 AI는 인터넷 없이 PC에서 동작하는 소형 모델로, 대형 AI 모델보다 느리고 답변이 안정적이지 않을 수 있습니다. 답변 아래 근거 원문을 꼭 확인해 주세요. ※",
+        "근거에서 답변 생성 중… [p] AI OFF로 취소할 수 있습니다.\n\n※ 이 AI는 인터넷 없이 PC에서 동작하는 소형 모델로, 대형 AI 모델보다 느리고 답변이 안정적이지 않을 수 있습니다. 답변창 하단의 [근거 원문 보기]로 원문을 확인해 주세요. ※",
     ));
     let allowed: Vec<_> = usable.iter().map(|d| d["id"].clone()).collect();
     client.stage("answer");
@@ -1323,7 +1323,7 @@ fn answer(
     let scope = source_scopes(&usable);
     let required = crate::evidence_bundles::required_display(&usable);
     let arithmetic = calculation.map(|s| format!("\n\n{s}")).unwrap_or_default();
-    Ok(Update{phase:"READY".into(),text:format!("AI 생성 답변 · 원문 대조 필요\n질문: {q}\n\n{scope}{text}{arithmetic}\n\n{required}근거 자료 · [s]를 누르면 왼쪽에 원문을 모아 봅니다. 조건과 대상은 원문에서 확인하세요.\n{}",labels.join("\n")),sources})
+    Ok(Update{phase:"READY".into(),text:format!("AI 생성 답변 · 원문 대조 필요\n질문: {q}\n\n{scope}{text}{arithmetic}\n\n{required}근거 자료 · 아래 [근거 원문 보기]를 누르면 왼쪽에서 원문을 [1] [2] 순서로 볼 수 있습니다. 조건과 대상은 원문에서 확인하세요.\n{}",labels.join("\n")),sources})
 }
 
 fn repair_limit(reserved: usize, input_tokens: usize) -> Result<usize> {
