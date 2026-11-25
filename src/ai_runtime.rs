@@ -76,7 +76,7 @@ fn gib(kib: u64) -> String {
 }
 fn low_memory_text(kib: u64) -> String {
     format!(
-        "사용 가능한 메모리가 {}입니다(권장 {} 이상). 이대로 켜면 답변이 느리거나 다른 프로그램이 잠시 멈출 수 있습니다. 브라우저 창 등 다른 프로그램을 닫으면 더 안정적입니다.\n\n[y] 그래도 켜기    [n] 취소",
+        "사용 가능한 메모리가 {}입니다(권장 {} 이상). 이대로 켜면 답변이 느리거나 다른 프로그램이 잠시 멈출 수 있습니다. 브라우저 창 등 다른 프로그램을 닫으면 더 안정적입니다.\n\n[Enter 또는 y] 그래도 켜기    [Esc 또는 n] 취소",
         gib(kib),
         gib(MEMORY_RECOMMENDED_KIB)
     )
@@ -2155,7 +2155,7 @@ mod reliability_tests {
             MemoryLevel::TooLow(1_000_000)
         );
         assert!(low_memory_text(2_700_000).contains("2.6GB"));
-        assert!(low_memory_text(2_700_000).contains("[y]"));
+        assert!(low_memory_text(2_700_000).contains("[Enter 또는 y]"));
         assert!(too_low_memory_text(1_000_000).contains("최소 1.5GB"));
         let p = std::env::temp_dir().join(format!("sos-asset-test-{}", std::process::id()));
         fs::write(&p, b"corrupt").unwrap();

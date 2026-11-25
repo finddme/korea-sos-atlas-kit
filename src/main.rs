@@ -385,6 +385,8 @@ struct App {
     ai_draft: String,
     ai_editing: bool,
     ai_pending: Option<String>,
+    /// Items in the current category without the search filter (list header).
+    cat_total: usize,
     ai_phase: String,
     ai_asked: bool,
     // Which linked source is open in the left pane (1-based, 0 = none yet).
@@ -422,7 +424,15 @@ fn str_width(s: &str) -> u16 {
 }
 /// AI pane buttons on the row above the question box: (x offset, label, hit kind).
 fn ai_buttons(phase: &str, sources: usize, asked: bool, shown: usize) -> Vec<(u16, String, u8)> {
-    let mut labels = vec![(ai_button(phase).to_string(), 8u8)];
+    let mut labels = if phase == "CONFIRM_MEMORY" {
+        // Two real buttons: the AI on/off button would cancel this question.
+        vec![
+            ("[Enter 그래도 켜기]".to_string(), 12u8),
+            ("[Esc 취소]".to_string(), 13),
+        ]
+    } else {
+        vec![(ai_button(phase).to_string(), 8u8)]
+    };
     if sources > 0 {
         // One source opens per press; the label shows which one is open.
         labels.push((
@@ -452,7 +462,6 @@ fn ai_button(phase: &str) -> &'static str {
         "" | "OFF" | "ERROR" => "[p AI 켜기]",
         "UNAVAILABLE" => "[p AI 사용 불가 · 이유]",
         "STARTING" => "[p 켜는 중 · 취소]",
-        "CONFIRM_MEMORY" => "[y 그래도 켜기 · n 취소]",
         "STOPPING" => "[끄는 중…]",
         _ => "[p AI 끄기]",
     }
@@ -585,7 +594,7 @@ fn draw(f: &mut Frame, a: &mut App, docs: &[Doc], rows: &[usize], ai: &Ai, bench
             } else if ai.phase == "ERROR" {
                 " AI ERROR [p: AI ON]".into()
             } else if ai.phase == "CONFIRM_MEMORY" {
-                " LOW MEMORY [y: ON n: OFF]".into()
+                " LOW MEMORY [Enter/Esc]".into()
             } else {
                 format!(" {} [p: AI OFF]", ai.phase)
             }
@@ -724,7 +733,12 @@ fn draw(f: &mut Frame, a: &mut App, docs: &[Doc], rows: &[usize], ai: &Ai, bench
             } else {
                 "Documents"
             },
-            rows.len()
+            // While searching, show the share of the whole category: "5 of 404".
+            if a.query.is_empty() || a.cat_total <= rows.len() {
+                rows.len().to_string()
+            } else {
+                format!("{} of {}", rows.len(), a.cat_total)
+            }
         ),
         w - edge - 3,
         style(Some(51)),
@@ -1394,6 +1408,11 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
             continue;
         }
         let rows = browse(docs, &a.query, CATS[a.cat]);
+        a.cat_total = if a.query.is_empty() {
+            rows.len()
+        } else {
+            browse(docs, "", CATS[a.cat]).len()
+        };
         a.selected = a.selected.min(rows.len().saturating_sub(1));
         if dirty {
             t.draw(|f| {
@@ -1422,13 +1441,19 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
                 {
                     break;
                 }
+                // Enter/Esc also work while a Korean input method is composing,
+                // which can hold back a single y/n key.
                 if engine.status.phase == "CONFIRM_MEMORY"
+                    && !a.ai_editing
+                    && !a.editing
                     && matches!(
                         k.code,
-                        KeyCode::Char('y' | 'Y' | 'n' | 'N' | 'ㅛ' | 'ㅜ') | KeyCode::Esc
+                        KeyCode::Char('y' | 'Y' | 'n' | 'N' | 'ㅛ' | 'ㅜ')
+                            | KeyCode::Enter
+                            | KeyCode::Esc
                     )
                 {
-                    if matches!(k.code, KeyCode::Char('y' | 'Y' | 'ㅛ')) {
+                    if matches!(k.code, KeyCode::Char('y' | 'Y' | 'ㅛ') | KeyCode::Enter) {
                         engine.confirm_low_memory();
                         a.notice.clear();
                     } else {
@@ -1555,11 +1580,20 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
                 match m.kind {
                     MouseEventKind::Down(MouseButton::Left) => {
                         if let Some((kind, n)) = target {
-                            if !matches!(kind, 8..=11) {
+                            if !matches!(kind, 8..=13) {
                                 a.ai_editing = false;
                             }
                             match kind {
                                 11 => copy_current(&mut a, docs, &ai_raw),
+                                12 => {
+                                    engine.confirm_low_memory();
+                                    a.notice.clear();
+                                }
+                                13 => {
+                                    engine.decline_low_memory();
+                                    a.ai_pending = None;
+                                    a.notice = "AI를 켜지 않았습니다.".into();
+                                }
                                 10 => open_ai_source(&mut a, docs, &engine.status.sources),
                                 8 if state.is_none() => {
                                     engine.toggle();
