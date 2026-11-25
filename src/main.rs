@@ -731,7 +731,9 @@ fn status_sections(content: &Path, docs: &[Doc], engine: &ai_runtime::Controller
             "STARTING" => "상태: 켜는 중".into(),
             "SEARCHING" | "ANSWERING" => "상태: 답변 중".into(),
             "STOPPING" => "상태: 끄는 중".into(),
-            "CONFIRM_MEMORY" => format!("상태: 켤지 묻는 중 (AI 칸에서 Enter/Esc) — {detail}"),
+            "CONFIRM_MEMORY" => {
+                format!("상태: 켤지 묻는 중 (\"2 Show AI\"에서 Enter/Esc로 답함) — {detail}")
+            }
             "ERROR" => format!("상태: 켜지 못했거나 멈춤 — {detail}"),
             other => format!("상태: {other}"),
         }));
@@ -748,11 +750,9 @@ fn status_sections(content: &Path, docs: &[Doc], engine: &ai_runtime::Controller
         let running = ai_runtime::engine_process().is_some();
         let level = match (running, ai_runtime::memory_level(mem)) {
             (true, _) => "AI가 켜져 있는 동안의 값",
-            (false, ai_runtime::MemoryLevel::Enough) => "지금 켜면 바로 켜집니다",
-            (false, ai_runtime::MemoryLevel::Low(_)) => {
-                "지금 켜면 느려질 수 있다고 확인을 묻습니다"
-            }
-            (false, ai_runtime::MemoryLevel::TooLow(_)) => "지금은 메모리가 부족해 켤 수 없습니다",
+            (false, ai_runtime::MemoryLevel::Enough) => "켜면 바로 켜집니다",
+            (false, ai_runtime::MemoryLevel::Low(_)) => "켜면 확인을 묻습니다 (느려질 수 있음)",
+            (false, ai_runtime::MemoryLevel::TooLow(_)) => "부족해서 켤 수 없습니다",
         };
         ai.push(Text(format!(
             "사용 가능한 메모리: {} — {level}",
@@ -760,12 +760,13 @@ fn status_sections(content: &Path, docs: &[Doc], engine: &ai_runtime::Controller
                 .unwrap_or_else(|| "확인 불가".into())
         )));
         ai.push(Text(format!(
-            "기준: 권장 {} 이상 · 최소 {} · 답하는 동안 약 1.6GB 사용",
+            "기준: 권장 {} · 최소 {} · 답할 때 약 1.6GB 사용",
             ai_runtime::gib(ai_runtime::MEMORY_RECOMMENDED_KIB),
             ai_runtime::gib(ai_runtime::MEMORY_MINIMUM_KIB)
         )));
+        ai.push(Text("인터넷 연결 없이 동작하는 AI입니다.".into()));
         ai.push(Text(
-            "켜기·끄기: [2 Show AI] 칸에서 p · 인터넷을 쓰지 않습니다".into(),
+            "켜기·끄기: 상단 \"2 Show AI\"에서 조작할 수 있습니다.".into(),
         ));
     }
 
@@ -851,9 +852,11 @@ fn draw_status(f: &mut Frame, a: &mut App, w: u16, h: u16) {
         for line in &section.lines {
             match line {
                 StatusLine::Text(t) => {
-                    for part in wrap(t, width as usize) {
+                    // Bulleted; wrapped lines are indented under the text.
+                    for (k, part) in wrap(t, width.saturating_sub(2) as usize).iter().enumerate() {
                         if y < h - 1 {
-                            put(f, y, x, &part, width, normal);
+                            put(f, y, x, if k == 0 { "-" } else { " " }, 1, muted);
+                            put(f, y, x + 2, part, width - 2, normal);
                         }
                         y += 1;
                     }
