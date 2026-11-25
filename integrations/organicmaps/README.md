@@ -23,6 +23,7 @@ Organic Maps 이름·로고·지도 고지를 보존하고, 수정판임을 창 
 `organicmaps-windows.yml`은 upstream의 Windows CI 단계(MSVC, Qt 6.8.3 msvc2022_64 + qtpositioning, `ci-windows` 프리셋)를 그대로 따른다. 그다음 패치를 적용하고 `OMIM_WINDOWS_DISTRIBUTION=direct`로 빌드한 뒤, upstream의 배포 준비 스크립트(`tools/windows/stage_runtime.py`)로 실행 폴더를 만든다.
 
 - upstream 배포 준비는 Visual C++ 런타임을 넣지 않는다. 그래서 워크플로가 `vcruntime140*.dll`·`msvcp140*.dll`을 실행 파일 옆에 함께 둔다. 새로 설치한 Windows 10/11에서도 따로 설치할 것이 없다.
+- Qt가 넣는 CPU 렌더러 `opengl32sw.dll`은 2016년판 Mesa 11.2.2라서 이 지도 프로그램에 쓸 수 있는 그래픽 장치를 만들지 못한다(흰 화면). 워크플로가 Mesa 26.2.5 llvmpipe(pal1000/mesa-dist-win의 MSVC 빌드, 버전·SHA-256 고정)로 바꾸고 `libgallium_wgl.dll`을 함께 둔다. Mesa·LLVM 라이선스는 `licenses/mesa/`에 넣는다. 그래픽 드라이버가 정상인 PC에서는 쓰이지 않는다.
 - 결과 폴더에는 `licenses/korea-sos-atlas-kit/`(이 패치, 수정 고지, 빌드 기록)와 전체 파일의 `SHA256SUMS`가 들어간다. 지도 데이터는 넣지 않는다.
 - 워크플로 결과물(artifact) `organicmaps-windows-x64`를 받아 키트의 `data/runtime/organicmaps-win-x64/`에 둔다. 키트의 `assets.json`이 `SHA256SUMS`의 해시를 고정하고, 앱은 지도를 열기 전에 모든 파일을 대조한다.
 
@@ -47,7 +48,7 @@ flatpak run --user --unshare=network --filesystem="$PWD" --command=bash org.kde.
 
 앱은 지도 파일(`maps.json`)과 지도 프로그램의 해시를 확인한 뒤에만 지도를 연다. 맞지 않으면 다른 프로그램으로 조용히 대체하지 않고 오류를 표시한다. Linux는 네트워크를 차단한 샌드박스에서 실행한다. Windows는 관리자 권한 없이 실행해야 해서 운영체제 방화벽 대신 지도 프로그램 안에서 네트워크를 끈다. 키트가 `SOS_ATLAS_OFFLINE=1`로 실행하면 모든 HTTP 요청이 소켓을 열기 전에 실패하고(`libs/platform/atlas_offline.hpp`, `http_client_qt.cpp`), 지도 내려받기 단추·환영 화면·내려받기/재시도 단추가 사라진다. 키트에 없는 지역은 "오프라인 키트에 들어 있지 않습니다"라고만 표시한다. 지도 보기·검색·경로 계산에는 네트워크가 필요하지 않다.
 
-그래픽 드라이버가 없거나 OpenGL이 오래된 PC에서는 지도 프로그램이 시작 직후 비정상 종료할 수 있다. 앱은 시작 20초 안의 비정상 종료를 감지하면 Qt에 포함된 CPU 렌더러(`opengl32sw.dll`, `QT_OPENGL=software`)로 한 번 다시 열고, 상태 폴더에 `opengl-software` 파일을 남겨 다음부터 바로 CPU 렌더링으로 연다. 이 파일을 지우면 다시 그래픽 카드를 쓴다.
+그래픽 드라이버가 없거나 OpenGL이 오래된 PC에서는 지도 프로그램이 시작 직후 비정상 종료할 수 있다. 앱은 시작 20초 안의 비정상 종료를 감지하면 CPU 렌더러(`opengl32sw.dll`, `QT_OPENGL=software`)로 한 번 다시 열고, 상태 폴더에 `opengl-software` 파일을 남겨 다음부터 바로 CPU 렌더링으로 연다. 이 파일을 지우면 다시 그래픽 카드를 쓴다.
 
 ## 위치 수신 범위
 

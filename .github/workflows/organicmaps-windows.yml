@@ -127,6 +127,42 @@ jobs:
           cp -v "$crt"/*.dll "$stage/"
           echo "$crt" > "$stage/licenses/VC-RUNTIME-SOURCE.txt"
 
+      # Qt ships Mesa 11.2.2 (2016) as opengl32sw.dll. It creates no usable
+      # context for this viewer (empty renderer, white window), so PCs without
+      # a graphics driver could not draw the map. A current Mesa llvmpipe build
+      # replaces it; Qt loads it only when hardware OpenGL is unavailable or
+      # QT_OPENGL=software is set.
+      - name: Replace software OpenGL with current Mesa llvmpipe
+        env:
+          MESA_VERSION: 26.2.5
+          MESA_SHA256: 997123ef4ce8896204ab912d5b54f19372c487ff9835bcefafa2fca23b8953c2
+        run: |
+          stage="$GITHUB_WORKSPACE/stage"
+          cd "$RUNNER_TEMP"
+          curl -fsSL -o mesa.7z \
+            "https://github.com/pal1000/mesa-dist-win/releases/download/$MESA_VERSION/mesa3d-$MESA_VERSION-release-msvc.7z"
+          echo "$MESA_SHA256 *mesa.7z" | sha256sum -c -
+          7z x -omesa mesa.7z x64/opengl32.dll x64/libgallium_wgl.dll
+          cp -v mesa/x64/opengl32.dll "$stage/opengl32sw.dll"
+          cp -v mesa/x64/libgallium_wgl.dll "$stage/"
+          git clone -q --depth 1 --branch "mesa-$MESA_VERSION" --filter=blob:none --sparse \
+            https://gitlab.freedesktop.org/mesa/mesa.git mesa-src
+          git -C mesa-src sparse-checkout set licenses
+          notice="$stage/licenses/mesa"
+          mkdir -p "$notice"
+          cp -rv mesa-src/licenses/. "$notice/"
+          curl -fsSL -o "$notice/LLVM-LICENSE.TXT" \
+            https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-21.1.0/llvm/LICENSE.TXT
+          cat > "$notice/README.txt" <<EOF
+          opengl32sw.dll and libgallium_wgl.dll: Mesa $MESA_VERSION llvmpipe (software OpenGL).
+          Source: https://gitlab.freedesktop.org/mesa/mesa/-/tree/mesa-$MESA_VERSION
+          Binary: https://github.com/pal1000/mesa-dist-win/releases/tag/$MESA_VERSION
+            (mesa3d-$MESA_VERSION-release-msvc.7z, SHA-256 $MESA_SHA256)
+          Mesa is mostly MIT-licensed; the licenses used in Mesa are in this folder.
+          The binaries include LLVM (Apache-2.0 WITH LLVM-exception, LLVM-LICENSE.TXT).
+          These replace Qt's opengl32sw.dll (Mesa 11.2.2).
+          EOF
+
       - name: Add kit modification notice
         run: |
           stage="$GITHUB_WORKSPACE/stage"
