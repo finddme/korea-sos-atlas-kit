@@ -788,11 +788,17 @@ fn status_sections(
                 vec![
                     (
                         ai_runtime::MEMORY_MINIMUM_KIB as f64 / t as f64,
-                        "최소".into(),
+                        format!(
+                            "AI 최소 {}",
+                            ai_runtime::gib(ai_runtime::MEMORY_MINIMUM_KIB)
+                        ),
                     ),
                     (
                         ai_runtime::MEMORY_RECOMMENDED_KIB as f64 / t as f64,
-                        "권장".into(),
+                        format!(
+                            "AI 권장 {}",
+                            ai_runtime::gib(ai_runtime::MEMORY_RECOMMENDED_KIB)
+                        ),
                     ),
                 ],
             ));
@@ -823,11 +829,7 @@ fn status_sections(
         Some((_, None)) => kv(Some(GREEN), "AI 엔진", "실행 중".into()),
         None => kv(Some(GREY), "AI 엔진", "메모리 사용 없음".into()),
     });
-    memory.push(Note(format!(
-        "AI 기준: 권장 {} · 최소 {} · 답할 때 약 1.6GB 사용",
-        ai_runtime::gib(ai_runtime::MEMORY_RECOMMENDED_KIB),
-        ai_runtime::gib(ai_runtime::MEMORY_MINIMUM_KIB)
-    )));
+    memory.push(Note("AI는 답할 때 약 1.6GB를 씁니다.".into()));
 
     // Content
     let count = |prefix: &str| docs.iter().filter(|d| d.title.starts_with(prefix)).count();
@@ -1037,10 +1039,28 @@ fn draw_status(f: &mut Frame, a: &mut App, w: u16, h: u16) {
                             let st = if c < filled { cell(*color) } else { cell(236) };
                             put(f, y, x + c, " ", 1, st);
                         }
+                        // Threshold ticks on the bar itself; labels go in a
+                        // legend line so close marks cannot overlap.
+                        let mut legend = Vec::new();
                         for (frac, label) in marks {
                             let at = (frac.clamp(0.0, 1.0) * bw as f64).round() as u16;
-                            put(f, y + 1, x + at.min(bw - 1), &format!("^{label}"), 8, muted);
+                            let at = at.min(bw - 1);
+                            let bg = if at < filled { *color } else { 236 };
+                            let tick = normal
+                                .bg(Color::Indexed(bg))
+                                .fg(Color::Indexed(231))
+                                .add_modifier(Modifier::BOLD);
+                            put(f, y, x + at, "|", 1, tick);
+                            legend.push(label.as_str());
                         }
+                        put(
+                            f,
+                            y + 1,
+                            x,
+                            &format!("| = {}", legend.join(" · ")),
+                            bw,
+                            muted,
+                        );
                     }
                     y += 2;
                 }
