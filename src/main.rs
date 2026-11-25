@@ -925,7 +925,7 @@ fn status_sections(
             format!("Korea SOS Atlas Kit v{}", env!("CARGO_PKG_VERSION")),
         ),
         kv(None, "위치", layout::plain(app_dir).display().to_string()),
-        Note("구조 요청 서비스가 아닙니다. 위급할 때는 119·112에 먼저 연락하세요.".into()),
+        Note("구조 요청 서비스가 아닙니다. 공식 안내가 있으면 그 안내를 먼저 따르세요.".into()),
         // One link per line so terminals can detect and open each address.
         Note("Map data © OpenStreetMap and Organic Maps".into()),
         Note("https://organicmaps.app".into()),
