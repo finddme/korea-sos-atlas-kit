@@ -923,6 +923,7 @@ fn draw(f: &mut Frame, a: &mut App, docs: &[Doc], rows: &[usize], ai: &Ai, bench
     }
     if a.view == 2 {
         draw_status(f, a, w, h);
+        underline_hover(f, a, w, h, rows.len());
         return;
     }
     let sy = if w >= 115 { 1 } else { 2 };
@@ -1271,14 +1272,17 @@ fn draw(f: &mut Frame, a: &mut App, docs: &[Doc], rows: &[usize], ai: &Ai, bench
         }
     }
     put(f, h - 1, 1, &a.notice, w - 3, normal);
-    // Hover feedback for every clickable button or label, like the top tabs:
-    // underline the cells of the hovered target. List rows (categories,
-    // documents) keep their background highlight instead.
+    underline_hover(f, a, w, h, rows.len());
+}
+/// Hover feedback for every clickable button or label, like the top tabs:
+/// underline the cells of the hovered target. List rows (categories,
+/// documents) keep their background highlight instead.
+fn underline_hover(f: &mut Frame, a: &App, w: u16, h: u16, count: usize) {
     if let Some(target) = a.hover.filter(|t| !matches!(t.0, 2 | 3)) {
         let y = a.hover_row;
         if y < h {
             for x in 0..w {
-                if hit(x, y, w, h, a, rows.len()) == Some(target) {
+                if hit(x, y, w, h, a, count) == Some(target) {
                     let cell = &mut f.buffer_mut()[(x, y)];
                     cell.modifier.insert(Modifier::UNDERLINED);
                 }
@@ -2216,6 +2220,41 @@ mod tests {
         };
         let (_, _, _, bottom) = geometry(120, 30, 1);
         assert_eq!(hit(tabs[1].0, bottom - 1, 120, 30, &a, 3), Some((14, 1)));
+    }
+
+    #[test]
+    fn status_buttons_are_underlined_on_hover() {
+        let root = crate::project_root().join("dev/content-library");
+        let (docs, _) = load(&root).unwrap();
+        let mut a = App {
+            view: 2,
+            status: vec![Section {
+                title: " AI ",
+                color: 226,
+                lines: vec![StatusLine::Button("[p AI on/off]".into(), 16)],
+            }],
+            ..App::default()
+        };
+        let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+        terminal
+            .draw(|f| draw(f, &mut a, &docs, &[0], &Ai::default(), false))
+            .unwrap();
+        let (x, y, bw, kind) = a.status_buttons[0];
+        assert_eq!(kind, 16);
+        a.hover = hit(x + 1, y, 120, 30, &a, 1);
+        a.hover_row = y;
+        assert_eq!(a.hover, Some((16, 0)));
+        terminal
+            .draw(|f| draw(f, &mut a, &docs, &[0], &Ai::default(), false))
+            .unwrap();
+        let buf = terminal.backend().buffer();
+        for cx in x..x + bw {
+            assert!(
+                buf[(cx, y)].modifier.contains(Modifier::UNDERLINED),
+                "x={cx}"
+            );
+        }
+        assert!(!buf[(x + bw, y)].modifier.contains(Modifier::UNDERLINED));
     }
 
     #[test]
