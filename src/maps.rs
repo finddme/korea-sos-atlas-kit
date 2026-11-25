@@ -47,7 +47,7 @@ pub(super) fn destination(root: &Path, location: Option<&shelters::Location>) ->
 }
 
 /// Required by the Organic Maps Binary Data License for apps that ship its map
-/// files: shown on the map (viewer), in the Settings/About view and the 지도
+/// files: shown on the map (viewer), in the Status view (Info) and the 지도
 /// category of the library, and when the map opens.
 pub(super) const MAP_ATTRIBUTION: &str =
     "Map data © OpenStreetMap and Organic Maps · https://organicmaps.app · https://openstreetmap.org/copyright";
@@ -307,6 +307,57 @@ fn spawn_viewer(root: &Path, software: bool) -> Result<(std::process::Child, Pat
             .env("GALLIUM_DRIVER", "llvmpipe");
     }
     Ok((cmd.spawn()?, log))
+}
+
+/// Lines for the Status view and whether CPU rendering is remembered.
+pub(super) fn status(root: &Path) -> (Vec<String>, bool) {
+    let mut lines = Vec::new();
+    let installed = match root.parent() {
+        Some(data) if cfg!(windows) => data.join(WINDOWS_VIEWER).join("OrganicMaps.exe").is_file(),
+        Some(data) => data.join("runtime/maps").is_dir(),
+        None => false,
+    };
+    let version = fs::read(root.join("maps.json"))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .and_then(|m| match &m["version"] {
+            Value::String(v) => Some(v.clone()),
+            Value::Number(v) => Some(v.to_string()),
+            _ => None,
+        });
+    lines.push(if installed {
+        "지도 프로그램: 있음 (Organic Maps 사용성 개선판)".into()
+    } else if cfg!(any(windows, target_os = "linux")) {
+        "지도 프로그램: 없음 — 자료와 대피시설 목록은 그대로 쓸 수 있습니다".into()
+    } else {
+        "이 운영체제에서는 지도 보기가 되지 않습니다".into()
+    });
+    lines.push(match version {
+        Some(v) => format!("지도 파일: 대한민국 {v}판 (오프라인)"),
+        None => "지도 파일: 없음".into(),
+    });
+    let cpu = cfg!(windows)
+        && state_dir(root)
+            .map(|d| d.join(SOFTWARE_GL_MARKER).is_file())
+            .unwrap_or(false);
+    lines.push(if cpu {
+        "그리기: CPU 렌더링 (그래픽 드라이버를 쓸 수 없던 기록이 있어 CPU로 그립니다)".into()
+    } else {
+        "그리기: 그래픽 카드 (안 되면 자동으로 CPU 렌더링)".into()
+    });
+    lines.push("인터넷: 쓰지 않음 (내려받기·업데이트·업로드 차단)".into());
+    (lines, cpu)
+}
+
+/// Forget the CPU rendering fallback: the next launch tries the graphics card.
+pub(super) fn reset_software_gl(root: &Path) -> String {
+    match state_dir(root).map(|d| d.join(SOFTWARE_GL_MARKER)) {
+        Ok(m) if m.is_file() => match fs::remove_file(&m) {
+            Ok(()) => "다음에 지도를 열 때 그래픽 카드로 그립니다.".into(),
+            Err(e) => format!("CPU 렌더링 기록을 지우지 못했습니다: {e}"),
+        },
+        _ => "이미 그래픽 카드로 그리도록 되어 있습니다.".into(),
+    }
 }
 
 pub(super) fn launch(root: &Path) -> String {

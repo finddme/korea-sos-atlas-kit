@@ -71,7 +71,7 @@ pub fn memory_level(available_kib: Option<u64>) -> MemoryLevel {
         _ => MemoryLevel::Enough,
     }
 }
-fn gib(kib: u64) -> String {
+pub fn gib(kib: u64) -> String {
     format!("{:.1}GB", kib as f64 / (1024.0 * 1024.0))
 }
 fn low_memory_text(kib: u64) -> String {
@@ -1915,6 +1915,10 @@ fn hash_asset(path: &Path, expected: &str, cancel: &AtomicBool) -> Result<()> {
     Ok(())
 }
 /// Available physical memory in KiB, or None when the OS cannot tell.
+/// For the Status view.
+pub fn available_memory_kib() -> Option<u64> {
+    available_memory()
+}
 /// Available physical memory in KiB. Tests can substitute the value with a file
 /// named by SOS_AI_FAKE_AVAILABLE_FILE (read on every call, so a test can lower
 /// it while the model runs).

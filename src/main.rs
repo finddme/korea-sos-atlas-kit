@@ -410,6 +410,9 @@ struct App {
     hover: Option<(u8, usize)>,
     /// Mouse row of `hover`; buttons on that row are underlined (see draw).
     hover_row: u16,
+    /// Status view (3): sections built each frame, and where its buttons are.
+    status: Vec<Section>,
+    status_buttons: Vec<(u16, u16, u16, u8)>,
 }
 #[derive(Default, Deserialize, PartialEq)]
 struct Ai {
@@ -530,7 +533,7 @@ fn tabs(view: u8) -> Vec<(u16, String)> {
         } else {
             "[2 Show AI]"
         },
-        "[3 Settings]",
+        "[3 Status]",
         "[4 Maps]",
     ];
     let mut x = 1;
@@ -640,6 +643,213 @@ fn show_source(a: &mut App, docs: &[Doc], k: usize) {
         docs[a.collection[k]].title
     );
 }
+fn thousands(n: usize) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+enum StatusLine {
+    Text(String),
+    /// Label and hit kind (16 AI on/off, 17 use graphics card, 18 open licences).
+    Button(String, u8),
+}
+struct Section {
+    title: &'static str,
+    color: u8,
+    lines: Vec<StatusLine>,
+}
+/// The Status view (3): what this kit contains and the state of AI and maps.
+fn status_sections(content: &Path, docs: &[Doc], engine: &ai_runtime::Controller) -> Vec<Section> {
+    use StatusLine::{Button, Text};
+    let data = layout::data_root(content);
+    let facilities = docs
+        .iter()
+        .filter(|d| d.location.is_some() || d.id.starts_with("shelter:"))
+        .count();
+    let manuals = docs
+        .iter()
+        .filter(|d| d.id.contains(':') && !d.id.starts_with("shelter:") && d.location.is_none())
+        .count();
+    let guides = docs.len() - facilities - manuals;
+    let mut content_lines = vec![
+        Text(format!(
+            "자료 {}건 (안내 자료 {guides}건 + 미군 생존 교범 {manuals}항목)",
+            guides + manuals
+        )),
+        Text(format!(
+            "대피·급수·의료 시설 {}곳 (행정안전부 공공데이터)",
+            thousands(facilities)
+        )),
+    ];
+    content_lines.push(Text(if content.join("default-local.json").exists() {
+        "개인용 로컬 자료가 함께 들어 있습니다. 이 폴더는 다른 사람에게 배포하지 마세요.".into()
+    } else {
+        "재배포·번역·편집이 허용된 공개 자료만 들어 있습니다.".into()
+    }));
+    content_lines.push(Text(
+        "실시간 경보·대피소 개방 여부는 방송과 현장 안내를 따르세요.".into(),
+    ));
+
+    let mut ai = Vec::new();
+    if let Some(reason) = &engine.unavailable {
+        ai.push(Text(format!("사용 불가: {reason}")));
+    } else {
+        if let Ok(assets) = layout::ai_assets(&data) {
+            let name = assets
+                .model
+                .path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            ai.push(Text(format!(
+                "모델: {name}{}",
+                if assets.model_parts.is_empty() {
+                    String::new()
+                } else {
+                    format!(" 외 {}조각", assets.model_parts.len())
+                }
+            )));
+        }
+        ai.push(Text(format!(
+            "상태: {}",
+            match engine.status.phase.as_str() {
+                "" | "OFF" => "꺼짐",
+                "READY" => "켜짐 (질문할 수 있음)",
+                "STARTING" => "켜는 중",
+                "SEARCHING" | "ANSWERING" => "답변 중",
+                "CONFIRM_MEMORY" => "메모리 부족 확인을 기다리는 중 (AI 칸)",
+                "STOPPING" => "끄는 중",
+                "ERROR" => "오류 (AI 칸의 안내 확인)",
+                other => other,
+            }
+        )));
+        let mem = ai_runtime::available_memory_kib();
+        let level = match ai_runtime::memory_level(mem) {
+            ai_runtime::MemoryLevel::Enough => "바로 켤 수 있습니다",
+            ai_runtime::MemoryLevel::Low(_) => "켤 때 느려질 수 있다고 확인을 묻습니다",
+            ai_runtime::MemoryLevel::TooLow(_) => "메모리가 부족해 켤 수 없습니다",
+        };
+        ai.push(Text(format!(
+            "사용 가능한 메모리: {} — {level}",
+            mem.map(ai_runtime::gib)
+                .unwrap_or_else(|| "확인 불가".into())
+        )));
+        ai.push(Text(format!(
+            "기준: 권장 {} 이상 · 최소 {} · 답하는 동안 약 1.6GB 사용",
+            ai_runtime::gib(ai_runtime::MEMORY_RECOMMENDED_KIB),
+            ai_runtime::gib(ai_runtime::MEMORY_MINIMUM_KIB)
+        )));
+        ai.push(Text("인터넷을 쓰지 않고 이 PC 안에서만 동작합니다.".into()));
+        ai.push(Button("[p AI on/off]".into(), 16));
+    }
+
+    let (map_lines, cpu) = maps::status(content);
+    let mut map: Vec<StatusLine> = map_lines.into_iter().map(Text).collect();
+    if cpu {
+        map.push(Button("[g Use graphics card]".into(), 17));
+    }
+
+    let app_dir = data
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| data.clone());
+    let info = vec![
+        Text(format!(
+            "Korea SOS Atlas Kit v{}",
+            env!("CARGO_PKG_VERSION")
+        )),
+        Text(format!("위치: {}", layout::plain(app_dir).display())),
+        Text("구조 요청 서비스가 아닙니다. 위급할 때는 119·112에 먼저 연락하세요.".into()),
+        // One link per line so terminals can detect and open each address.
+        Text("Map data © OpenStreetMap and Organic Maps".into()),
+        Text("https://organicmaps.app".into()),
+        Text("https://openstreetmap.org/copyright".into()),
+        Text("라이선스: LICENSING.md, LICENSES 폴더".into()),
+        Text("자료별 조건과 지킨 방법: LICENSES/CONTENT.md".into()),
+        Button("[l Open licenses folder]".into(), 18),
+    ];
+    vec![
+        Section {
+            title: " Content ",
+            color: 51,
+            lines: content_lines,
+        },
+        Section {
+            title: " AI ",
+            color: 226,
+            lines: ai,
+        },
+        Section {
+            title: " Map ",
+            color: 46,
+            lines: map,
+        },
+        Section {
+            title: " Info ",
+            color: 244,
+            lines: info,
+        },
+    ]
+}
+fn draw_status(f: &mut Frame, a: &mut App, w: u16, h: u16) {
+    let normal = style(None);
+    let muted = normal.fg(Color::Indexed(244));
+    put(
+        f,
+        2,
+        1,
+        "이 키트에 무엇이 들어 있는지, AI와 지도가 어떤 상태인지 보여 줍니다. [ ] 단추는 누를 수 있습니다.",
+        w - 2,
+        muted,
+    );
+    put(f, 3, 0, &"─".repeat(w as usize - 1), w, muted);
+    a.status_buttons.clear();
+    let half = w / 2;
+    let columns = [(2u16, half - 3), (half + 2, w - half - 4)];
+    let (mut col, mut y) = (0usize, 5u16);
+    for (i, section) in a.status.iter().enumerate() {
+        if i == 2 {
+            col = 1;
+            y = 5;
+        }
+        let (x, width) = columns[col];
+        put(
+            f,
+            y,
+            x,
+            section.title,
+            str_width(section.title),
+            style(Some(section.color)),
+        );
+        y += 2;
+        for line in &section.lines {
+            match line {
+                StatusLine::Text(t) => {
+                    for part in wrap(t, width as usize) {
+                        if y < h - 1 {
+                            put(f, y, x, &part, width, normal);
+                        }
+                        y += 1;
+                    }
+                }
+                StatusLine::Button(label, kind) => {
+                    if y < h - 1 {
+                        put(f, y, x, label, str_width(label), normal);
+                        a.status_buttons.push((x, y, str_width(label), *kind));
+                    }
+                    y += 1;
+                }
+            }
+        }
+        y += 1;
+    }
+}
 fn geometry(w: u16, h: u16, view: u8) -> (u16, u16, u16, u16) {
     (
         (w as f64 * 0.35) as u16,
@@ -712,63 +922,7 @@ fn draw(f: &mut Frame, a: &mut App, docs: &[Doc], rows: &[usize], ai: &Ai, bench
         )
     }
     if a.view == 2 {
-        let left = 20;
-        let right = left + 30.max((w - left) / 2);
-        put(
-            f,
-            2,
-            1,
-            "UI preview · No inference or system changes",
-            w - 2,
-            muted,
-        );
-        for y in [4, h - 3] {
-            put(f, y, 0, &"─".repeat(w as usize - 1), w, muted)
-        }
-        for x in [left, right] {
-            for y in 5..h - 3 {
-                put(f, y, x, "┊", 1, muted)
-            }
-        }
-        put(f, 4, 2, " Settings ", 17, style(Some(51)));
-        put(
-            f,
-            4,
-            left + 2,
-            " AI policy ",
-            right - left - 4,
-            style(Some(226)),
-        );
-        put(
-            f,
-            4,
-            right + 2,
-            " Content / Device ",
-            w - right - 4,
-            style(Some(244)),
-        );
-        for (i, s) in ["AI policy", "Content packs", "Device status", "Display"]
-            .iter()
-            .enumerate()
-        {
-            put(f, 6 + i as u16, 2, s, left - 4, muted)
-        }
-        for (y, s) in [
-            (6, "AI on boot: OFF · Planned"),
-            (8, "Start / stop: Manual · Planned"),
-            (10, "Idle shutdown: Optional · Planned"),
-        ] {
-            put(f, y, left + 2, s, right - left - 4, normal)
-        }
-        for (y, s) in [
-            (6, "Approved content library"),
-            (8, "Pack management: Unavailable"),
-            (10, "Battery / Storage / RAM"),
-            (12, "Device monitoring: Not connected"),
-        ] {
-            put(f, y, right + 2, s, w - right - 5, normal)
-        }
-        put(f, h - 2, 2, maps::MAP_ATTRIBUTION, w - 4, normal);
+        draw_status(f, a, w, h);
         return;
     }
     let sy = if w >= 115 { 1 } else { 2 };
@@ -843,7 +997,7 @@ fn draw(f: &mut Frame, a: &mut App, docs: &[Doc], rows: &[usize], ai: &Ai, bench
             if str_width(maps::MAP_ATTRIBUTION) <= w - edge - 4 {
                 maps::MAP_ATTRIBUTION
             } else {
-                "Map data © OpenStreetMap and Organic Maps · Links: [3 Settings]"
+                "Map data © OpenStreetMap and Organic Maps · Links: [3 Status]"
             }
         } else {
             "Guides · Facilities: 대피시설"
@@ -1157,7 +1311,11 @@ fn hit(x: u16, y: u16, w: u16, h: u16, a: &App, count: usize) -> Option<(u8, usi
         }
     }
     if a.view == 2 {
-        return None;
+        return a
+            .status_buttons
+            .iter()
+            .find(|(bx, by, bw, _)| y == *by && x >= *bx && x < bx + bw)
+            .map(|(_, _, _, kind)| (*kind, 0));
     }
     let (edge, half, split, bottom) = geometry(w, h, a.view);
     if a.view == 1 && x >= half + 2 && x < w - 2 {
@@ -1253,6 +1411,43 @@ fn powershell(script: &str) -> Command {
         &STANDARD.encode(b),
     ]);
     c
+}
+/// LICENSES next to the app (release) or in the project (development).
+fn licenses_dir(content: &Path) -> PathBuf {
+    let data = layout::data_root(content);
+    let mut dir = data.parent().map(Path::to_path_buf).unwrap_or(data);
+    for _ in 0..3 {
+        if dir.join("LICENSES").is_dir() {
+            return dir.join("LICENSES");
+        }
+        match dir.parent() {
+            Some(p) => dir = p.to_path_buf(),
+            None => break,
+        }
+    }
+    dir.join("LICENSES")
+}
+fn open_folder(path: &Path) -> String {
+    if !path.is_dir() {
+        return format!("폴더가 없습니다: {}", path.display());
+    }
+    let opener = if cfg!(windows) {
+        "explorer"
+    } else if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    match Command::new(opener)
+        .arg(layout::plain(path.to_path_buf()))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(_) => format!("폴더를 열었습니다: {}", path.display()),
+        Err(e) => format!("폴더를 열지 못했습니다({e}): {}", path.display()),
+    }
 }
 fn open_pdf(d: &Doc, _pdf: &Path) -> String {
     let result = (|| -> Result<bool, Box<dyn std::error::Error>> {
@@ -1534,6 +1729,9 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
             browse(docs, "", CATS[a.cat]).len()
         };
         a.selected = a.selected.min(rows.len().saturating_sub(1));
+        if a.view == 2 {
+            a.status = status_sections(pdf, docs, &engine);
+        }
         if dirty {
             t.draw(|f| {
                 draw(f, &mut a, docs, &rows, &ai, state.is_some());
@@ -1548,7 +1746,9 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
         if let Event::Mouse(m) = &ev {
             if m.kind == MouseEventKind::Down(MouseButton::Left) {
                 let (w, h) = crossterm::terminal::size()?;
-                if let Some(code) = hint_hit(m.column, m.row, w, h, a.editing) {
+                if let Some(code) =
+                    hint_hit(m.column, m.row, w, h, a.editing).filter(|_| a.view < 2)
+                {
                     a.ai_editing = false;
                     ev = Event::Key(crossterm::event::KeyEvent::new(
                         code,
@@ -1647,6 +1847,12 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
                             a.ai_editing = a.view == 1 && state.is_none();
                         }
                         KeyCode::Char('3') => a.view = 2,
+                        KeyCode::Char('g') if a.view == 2 => {
+                            a.notice = maps::reset_software_gl(pdf)
+                        }
+                        KeyCode::Char('l') if a.view == 2 => {
+                            a.notice = open_folder(&licenses_dir(pdf))
+                        }
                         KeyCode::Char('c') => copy_current(&mut a, docs, &ai_raw),
                         KeyCode::Char('4') => a.notice = maps::launch(pdf),
                         KeyCode::Char('m') => {
@@ -1722,12 +1928,15 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
                 match m.kind {
                     MouseEventKind::Down(MouseButton::Left) => {
                         if let Some((kind, n)) = target {
-                            if !matches!(kind, 8..=14) {
+                            if !matches!(kind, 8..=18) {
                                 a.ai_editing = false;
                             }
                             match kind {
                                 11 => copy_current(&mut a, docs, &ai_raw),
                                 14 => show_source(&mut a, docs, n),
+                                16 => engine.toggle(),
+                                17 => a.notice = maps::reset_software_gl(pdf),
+                                18 => a.notice = open_folder(&licenses_dir(pdf)),
                                 12 => {
                                     engine.confirm_low_memory();
                                     a.notice.clear();
