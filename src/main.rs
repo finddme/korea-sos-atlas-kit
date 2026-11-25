@@ -811,7 +811,7 @@ fn status_sections(
             None,
             "최근 1분",
             format!(
-                "최저 {} · 최고 {}",
+                "사용 가능 메모리 변화 · 최저 {} · 최고 {}",
                 ai_runtime::gib(*lo),
                 ai_runtime::gib(*hi)
             ),
@@ -964,7 +964,6 @@ fn status_sections(
 fn draw_status(f: &mut Frame, a: &mut App, w: u16, h: u16) {
     let normal = style(None);
     let muted = normal.fg(Color::Indexed(244));
-    let cell = |c: u8| normal.bg(Color::Indexed(c));
     put(
         f,
         2,
@@ -979,14 +978,27 @@ fn draw_status(f: &mut Frame, a: &mut App, w: u16, h: u16) {
     let columns = [(2u16, half - 4), (half + 2, w - half - 4)];
     let mut ys = [5u16, 5u16];
     let bottom = h - 1;
+    // Dotted divider between the two columns, as on the library screen.
+    for y in 5..bottom {
+        put(f, y, half - 1, "┊", 1, muted);
+    }
     for (i, section) in a.status.iter().enumerate() {
         let col = i % 2;
         let (x, width) = columns[col];
         let mut y = ys[col];
+        // Section rule: "── Title ─────" across the column.
         put(
             f,
             y,
-            x,
+            x - 1,
+            &"─".repeat(width as usize + 1),
+            width + 1,
+            muted,
+        );
+        put(
+            f,
+            y,
+            x + 1,
             section.title,
             str_width(section.title),
             style(Some(section.color)),
@@ -1031,33 +1043,36 @@ fn draw_status(f: &mut Frame, a: &mut App, w: u16, h: u16) {
                     }
                 }
                 StatusLine::Bar(fraction, color, marks) => {
-                    let x = x + 2;
-                    let bw = width.saturating_sub(4).max(10);
+                    // Under the value column; a 5/8-height block (one cell
+                    // wide even in the CJK console) keeps the bar slim.
+                    let x = x + 2 + key_w + 2;
+                    let bw = (columns[col].0 + width).saturating_sub(x).max(10);
                     let filled = ((fraction.clamp(0.0, 1.0)) * bw as f64).round() as u16;
                     if y + 1 < bottom {
                         for c in 0..bw {
-                            let st = if c < filled { cell(*color) } else { cell(236) };
-                            put(f, y, x + c, " ", 1, st);
+                            let fg = if c < filled { *color } else { 238 };
+                            put(f, y, x + c, "▅", 1, normal.fg(Color::Indexed(fg)));
                         }
-                        // Threshold ticks on the bar itself; labels go in a
+                        // Threshold ticks in white on the bar; labels go in a
                         // legend line so close marks cannot overlap.
                         let mut legend = Vec::new();
                         for (frac, label) in marks {
                             let at = (frac.clamp(0.0, 1.0) * bw as f64).round() as u16;
-                            let at = at.min(bw - 1);
-                            let bg = if at < filled { *color } else { 236 };
-                            let tick = normal
-                                .bg(Color::Indexed(bg))
-                                .fg(Color::Indexed(231))
-                                .add_modifier(Modifier::BOLD);
-                            put(f, y, x + at, "|", 1, tick);
+                            put(
+                                f,
+                                y,
+                                x + at.min(bw - 1),
+                                "▅",
+                                1,
+                                normal.fg(Color::Indexed(231)),
+                            );
                             legend.push(label.as_str());
                         }
                         put(
                             f,
                             y + 1,
                             x,
-                            &format!("| = {}", legend.join(" · ")),
+                            &format!("흰 눈금 = {}", legend.join(" · ")),
                             bw,
                             muted,
                         );
@@ -1065,12 +1080,28 @@ fn draw_status(f: &mut Frame, a: &mut App, w: u16, h: u16) {
                     y += 2;
                 }
                 StatusLine::Strip(colors) => {
-                    let sw = width.saturating_sub(4) as usize;
+                    let x = x + 2 + key_w + 2;
+                    let sw = (columns[col].0 + width).saturating_sub(x) as usize;
                     let shown = &colors[colors.len().saturating_sub(sw)..];
-                    if y < bottom {
+                    if y + 1 < bottom {
                         for (c, color) in shown.iter().enumerate() {
-                            put(f, y, x + 2 + c as u16, " ", 1, cell(*color));
+                            put(
+                                f,
+                                y,
+                                x + c as u16,
+                                "▅",
+                                1,
+                                normal.fg(Color::Indexed(*color)),
+                            );
                         }
+                        put(
+                            f,
+                            y + 1,
+                            x,
+                            "1초에 한 칸 · 초록 충분 · 노랑 확인 · 빨강 부족",
+                            sw as u16,
+                            muted,
+                        );
                     }
                     y += 2;
                 }
