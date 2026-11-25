@@ -45,6 +45,48 @@ pub struct Controller {
     retained: Option<Update>,
     /// Why AI cannot run in this build (e.g. Atlas without the AI pack), if so.
     pub unavailable: Option<String>,
+    /// The user chose to start despite low memory (CONFIRM_MEMORY → y).
+    low_memory_ok: bool,
+}
+
+/// Available-memory tiers for starting the model (KiB). Measured 2026-11-25 on
+/// Windows: the engine's working set during an answer is about 1.6 GiB (about
+/// 1.35 GiB of mapped model pages and 0.26 GiB of its own memory). Below the
+/// minimum the model is not started; between minimum and recommended the user
+/// decides; while running, the model is stopped below `MEMORY_RUNTIME_FLOOR_KIB`.
+pub const MEMORY_RECOMMENDED_KIB: u64 = 3 * 1024 * 1024;
+pub const MEMORY_MINIMUM_KIB: u64 = 1536 * 1024;
+const MEMORY_RUNTIME_FLOOR_KIB: u64 = 512 * 1024;
+
+#[derive(Debug, PartialEq)]
+pub enum MemoryLevel {
+    Enough,
+    Low(u64),
+    TooLow(u64),
+}
+pub fn memory_level(available_kib: Option<u64>) -> MemoryLevel {
+    match available_kib {
+        Some(kb) if kb < MEMORY_MINIMUM_KIB => MemoryLevel::TooLow(kb),
+        Some(kb) if kb < MEMORY_RECOMMENDED_KIB => MemoryLevel::Low(kb),
+        _ => MemoryLevel::Enough,
+    }
+}
+fn gib(kib: u64) -> String {
+    format!("{:.1}GB", kib as f64 / (1024.0 * 1024.0))
+}
+fn low_memory_text(kib: u64) -> String {
+    format!(
+        "사용 가능한 메모리가 {}입니다(권장 {} 이상). 이대로 켜면 답변이 느리거나 다른 프로그램이 잠시 멈출 수 있습니다. 브라우저 창 등 다른 프로그램을 닫으면 더 안정적입니다.\n\n[y] 그래도 켜기    [n] 취소",
+        gib(kib),
+        gib(MEMORY_RECOMMENDED_KIB)
+    )
+}
+fn too_low_memory_text(kib: u64) -> String {
+    format!(
+        "AI를 켜지 않았습니다. 사용 가능한 메모리가 {}로, AI 실행에 필요한 최소 {}보다 적습니다. 다른 프로그램을 닫은 뒤 다시 켜거나 일반 검색을 사용하세요.",
+        gib(kib),
+        gib(MEMORY_MINIMUM_KIB)
+    )
 }
 impl Controller {
     /// `root` is the data folder that holds assets.json, content-library,
@@ -66,10 +108,13 @@ impl Controller {
             root,
             retained: None,
             unavailable,
+            low_memory_ok: false,
         }
     }
     pub fn toggle(&mut self) {
-        if self.worker.is_some() {
+        if self.status.phase == "CONFIRM_MEMORY" {
+            self.decline_low_memory()
+        } else if self.worker.is_some() {
             self.stop()
         } else {
             self.start()
@@ -82,6 +127,19 @@ impl Controller {
         if let Some(reason) = &self.unavailable {
             self.status = Update::new("UNAVAILABLE", reason.clone());
             return;
+        }
+        if !memory_check_skipped() && !std::mem::take(&mut self.low_memory_ok) {
+            match memory_level(available_memory()) {
+                MemoryLevel::TooLow(kb) => {
+                    self.status = Update::new("ERROR", too_low_memory_text(kb));
+                    return;
+                }
+                MemoryLevel::Low(kb) => {
+                    self.status = Update::new("CONFIRM_MEMORY", low_memory_text(kb));
+                    return;
+                }
+                MemoryLevel::Enough => {}
+            }
         }
         let cancel = Arc::new(AtomicBool::new(false));
         self.retained = None;
@@ -104,6 +162,19 @@ impl Controller {
                 }
             }
         }));
+    }
+    /// `y` on the low-memory question: start anyway.
+    pub fn confirm_low_memory(&mut self) {
+        if self.status.phase == "CONFIRM_MEMORY" {
+            self.low_memory_ok = true;
+            self.start();
+        }
+    }
+    /// `n` on the low-memory question: stay off.
+    pub fn decline_low_memory(&mut self) {
+        if self.status.phase == "CONFIRM_MEMORY" {
+            self.status = Update::new("OFF", crate::AI_OFF_TEXT);
+        }
     }
     pub fn stop(&mut self) {
         if self.worker.is_some() {
@@ -658,7 +729,9 @@ impl Client<'_> {
                 return Err(fail(Code::Protocol, "엔진 응답 크기 제한 초과"));
             }
             if last_memory_check.elapsed() > Duration::from_secs(1) {
-                if !memory_check_skipped() && available_memory().is_some_and(|kb| kb < 512 * 1024) {
+                if !memory_check_skipped()
+                    && available_memory().is_some_and(|kb| kb < MEMORY_RUNTIME_FLOOR_KIB)
+                {
                     return Err(fail(
                         Code::Memory,
                         "실행 중 가용 RAM 부족을 감지하여 모델을 종료합니다.",
@@ -1842,8 +1915,22 @@ fn hash_asset(path: &Path, expected: &str, cancel: &AtomicBool) -> Result<()> {
     Ok(())
 }
 /// Available physical memory in KiB, or None when the OS cannot tell.
-#[cfg(windows)]
+/// Available physical memory in KiB. Tests can substitute the value with a file
+/// named by SOS_AI_FAKE_AVAILABLE_FILE (read on every call, so a test can lower
+/// it while the model runs).
 fn available_memory() -> Option<u64> {
+    if let Some(path) = std::env::var_os("SOS_AI_FAKE_AVAILABLE_FILE") {
+        if let Some(kb) = fs::read_to_string(path)
+            .ok()
+            .and_then(|s| s.trim().parse().ok())
+        {
+            return Some(kb);
+        }
+    }
+    os_available_memory()
+}
+#[cfg(windows)]
+fn os_available_memory() -> Option<u64> {
     let mut m = job::MemoryStatus {
         length: std::mem::size_of::<job::MemoryStatus>() as u32,
         load: 0,
@@ -1856,7 +1943,7 @@ fn available_memory() -> Option<u64> {
 /// macOS: free + inactive + purgeable pages (what can be handed out without swapping).
 #[cfg(target_os = "macos")]
 #[allow(deprecated)]
-fn available_memory() -> Option<u64> {
+fn os_available_memory() -> Option<u64> {
     unsafe {
         let mut info: libc::vm_statistics64 = std::mem::zeroed();
         let mut count = libc::HOST_VM_INFO64_COUNT;
@@ -1876,7 +1963,7 @@ fn available_memory() -> Option<u64> {
     }
 }
 #[cfg(not(any(windows, target_os = "macos")))]
-fn available_memory() -> Option<u64> {
+fn os_available_memory() -> Option<u64> {
     fs::read_to_string("/proc/meminfo")
         .ok()?
         .lines()
@@ -1898,8 +1985,9 @@ fn check_memory() -> Result<()> {
     check_available_memory(available_memory())
 }
 fn check_available_memory(memory: Option<u64>) -> Result<()> {
-    if memory.is_some_and(|kb| kb < 4_000_000) {
-        return Err(fail(Code::Memory,"가용 RAM이 약 3.8GiB보다 작아 모델을 시작하지 않았습니다. 다른 앱을 닫거나 일반 검색을 사용하세요."));
+    // Last check in the worker; the tiers (ask / refuse) run in Controller::start.
+    if let Some(kb) = memory.filter(|kb| *kb < MEMORY_MINIMUM_KIB) {
+        return Err(fail(Code::Memory, too_low_memory_text(kb)));
     }
     Ok(())
 }
@@ -1953,7 +2041,7 @@ fn failure_help(error: &ai_policy::Failure) -> String {
         }
         Code::Deadline => "응답 시간이 너무 길어 AI를 종료했습니다.",
         Code::Memory => {
-            "모델을 실행할 메모리가 부족합니다. 다른 앱을 닫거나 일반 검색을 사용하세요."
+            "메모리가 부족해 AI를 끄고 모델을 메모리에서 내렸습니다. 다른 프로그램을 닫은 뒤 다시 켜거나 일반 검색을 사용하세요."
         }
         Code::Repetition => "답변이 같은 내용을 반복해 생성을 중단했습니다.",
         Code::Protocol | Code::Schema | Code::Engine | Code::Internal => {
@@ -2054,11 +2142,21 @@ mod reliability_tests {
     use super::*;
     #[test]
     fn memory_guard_and_corrupt_asset() {
-        assert!(check_available_memory(Some(4_500_000)).is_ok());
+        assert!(check_available_memory(Some(2_000_000)).is_ok());
         assert_eq!(
             check_available_memory(Some(1_000_000)).unwrap_err().code,
             Code::Memory
         );
+        assert_eq!(memory_level(Some(4_000_000)), MemoryLevel::Enough);
+        assert_eq!(memory_level(None), MemoryLevel::Enough);
+        assert_eq!(memory_level(Some(2_700_000)), MemoryLevel::Low(2_700_000));
+        assert_eq!(
+            memory_level(Some(1_000_000)),
+            MemoryLevel::TooLow(1_000_000)
+        );
+        assert!(low_memory_text(2_700_000).contains("2.6GB"));
+        assert!(low_memory_text(2_700_000).contains("[y]"));
+        assert!(too_low_memory_text(1_000_000).contains("최소 1.5GB"));
         let p = std::env::temp_dir().join(format!("sos-asset-test-{}", std::process::id()));
         fs::write(&p, b"corrupt").unwrap();
         let cancelled = AtomicBool::new(false);

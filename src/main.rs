@@ -452,6 +452,7 @@ fn ai_button(phase: &str) -> &'static str {
         "" | "OFF" | "ERROR" => "[p AI 켜기]",
         "UNAVAILABLE" => "[p AI 사용 불가 · 이유]",
         "STARTING" => "[p 켜는 중 · 취소]",
+        "CONFIRM_MEMORY" => "[y 그래도 켜기 · n 취소]",
         "STOPPING" => "[끄는 중…]",
         _ => "[p AI 끄기]",
     }
@@ -478,10 +479,22 @@ fn send_question(a: &mut App, engine: &mut ai_runtime::Controller) {
                 "UNAVAILABLE" => {
                     a.notice = "AI를 쓸 수 없습니다. AI 답변 칸의 이유를 확인하세요.".into()
                 }
+                "CONFIRM_MEMORY" => {
+                    a.ai_pending = Some(q);
+                    a.notice =
+                        "메모리가 부족합니다. y를 누르면 그래도 켜고 질문을 보냅니다.".into();
+                }
+                "ERROR" => {
+                    a.notice = "AI를 켜지 못했습니다. AI 답변 칸의 안내를 확인하세요.".into()
+                }
                 _ => a.notice = "AI를 정리하는 중입니다. 잠시 후 다시 보내세요.".into(),
             }
         }
         "UNAVAILABLE" => a.notice = "AI를 쓸 수 없습니다. AI 답변 칸의 이유를 확인하세요.".into(),
+        "CONFIRM_MEMORY" => {
+            a.ai_pending = Some(q);
+            a.notice = "메모리가 부족합니다. y를 누르면 그래도 켜고 질문을 보냅니다.".into();
+        }
         _ => a.notice = "이전 질문을 처리하는 중입니다. 끝난 뒤 다시 보내세요.".into(),
     }
 }
@@ -571,6 +584,8 @@ fn draw(f: &mut Frame, a: &mut App, docs: &[Doc], rows: &[usize], ai: &Ai, bench
                 " AI OFF [p: AI ON]".into()
             } else if ai.phase == "ERROR" {
                 " AI ERROR [p: AI ON]".into()
+            } else if ai.phase == "CONFIRM_MEMORY" {
+                " LOW MEMORY [y: ON n: OFF]".into()
             } else {
                 format!(" {} [p: AI OFF]", ai.phase)
             }
@@ -1196,7 +1211,11 @@ fn ai_check_run(
         let start = Instant::now();
         loop {
             c.poll();
-            if c.status.phase == "ERROR" || c.status.phase == "UNAVAILABLE" {
+            // A headless check cannot answer the low-memory question; report it.
+            if matches!(
+                c.status.phase.as_str(),
+                "ERROR" | "UNAVAILABLE" | "CONFIRM_MEMORY"
+            ) {
                 return Err(c.status.text.clone());
             }
             if c.status.phase == phase {
@@ -1344,7 +1363,7 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
                         a.notice.clear();
                         dirty = true;
                     }
-                    "STARTING" => {}
+                    "STARTING" | "CONFIRM_MEMORY" => {}
                     _ => {
                         a.ai_pending = None;
                         a.notice = "AI가 켜지지 않아 질문을 보내지 못했습니다. AI 답변 칸의 안내를 확인하세요.".into();
@@ -1402,6 +1421,25 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
                     && k.code == KeyCode::Char('c')
                 {
                     break;
+                }
+                if engine.status.phase == "CONFIRM_MEMORY"
+                    && matches!(
+                        k.code,
+                        KeyCode::Char('y' | 'Y' | 'n' | 'N' | 'ㅛ' | 'ㅜ') | KeyCode::Esc
+                    )
+                {
+                    if matches!(k.code, KeyCode::Char('y' | 'Y' | 'ㅛ')) {
+                        engine.confirm_low_memory();
+                        a.notice.clear();
+                    } else {
+                        engine.decline_low_memory();
+                        a.ai_pending = None;
+                        a.notice = "AI를 켜지 않았습니다.".into();
+                    }
+                    a.view = 1;
+                    a.ai_offset = 0;
+                    dirty = true;
+                    continue;
                 }
                 if a.ai_editing {
                     match k.code {
