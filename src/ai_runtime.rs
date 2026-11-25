@@ -1323,7 +1323,7 @@ fn answer(
     let scope = source_scopes(&usable);
     let required = crate::evidence_bundles::required_display(&usable);
     let arithmetic = calculation.map(|s| format!("\n\n{s}")).unwrap_or_default();
-    Ok(Update{phase:"READY".into(),text:format!("AI 생성 답변 · 원문 대조 필요\n질문: {q}\n\n{scope}{text}{arithmetic}\n\n{required}근거 자료 · 아래 [근거 원문 보기]를 누르면 왼쪽에서 원문을 [1] [2] 순서로 볼 수 있습니다. 조건과 대상은 원문에서 확인하세요.\n{}",labels.join("\n")),sources})
+    Ok(Update{phase:"READY".into(),text:format!("AI 생성 답변 · 원문 대조 필요\n질문: {q}\n\n{scope}{text}{arithmetic}\n\n{required}근거 자료 · 아래 [근거 원문 보기]를 누르면 왼쪽에서 원문을 [1] [2] … 순서로 볼 수 있습니다. 조건과 대상은 원문에서 확인하세요.\n{}",labels.join("\n")),sources})
 }
 
 fn repair_limit(reserved: usize, input_tokens: usize) -> Result<usize> {

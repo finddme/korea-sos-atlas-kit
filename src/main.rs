@@ -1457,7 +1457,7 @@ fn open_ai_source(a: &mut App, docs: &[Doc], ids: &[String]) {
         a.ai_source_shown = 1;
     }
     a.notice = format!(
-        "근거 원문 {}건을 왼쪽에 모았습니다. 왼쪽 아래 [1] [2]… 를 누르거나 ←/→로 원문을 옮겨 봅니다.",
+        "근거 원문 {}건을 왼쪽에 모았습니다. 왼쪽 아래 [1] [2] … 를 누르거나 ←/→로 원문을 옮겨 봅니다.",
         a.collection.len()
     );
 }
