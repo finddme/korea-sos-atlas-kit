@@ -941,7 +941,7 @@ fn status_sections(
         },
         Section {
             title: " Memory ",
-            color: 51,
+            color: 21,
             lines: memory,
         },
         Section {
