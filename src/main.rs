@@ -408,6 +408,8 @@ struct App {
     view: u8,
     notice: String,
     hover: Option<(u8, usize)>,
+    /// Mouse row of `hover`; buttons on that row are underlined (see draw).
+    hover_row: u16,
 }
 #[derive(Default, Deserialize, PartialEq)]
 struct Ai {
@@ -1108,6 +1110,20 @@ fn draw(f: &mut Frame, a: &mut App, docs: &[Doc], rows: &[usize], ai: &Ai, bench
         }
     }
     put(f, h - 1, 1, &a.notice, w - 3, normal);
+    // Hover feedback for every clickable button or label, like the top tabs:
+    // underline the cells of the hovered target. List rows (categories,
+    // documents) keep their background highlight instead.
+    if let Some(target) = a.hover.filter(|t| !matches!(t.0, 2 | 3)) {
+        let y = a.hover_row;
+        if y < h {
+            for x in 0..w {
+                if hit(x, y, w, h, a, rows.len()) == Some(target) {
+                    let cell = &mut f.buffer_mut()[(x, y)];
+                    cell.modifier.insert(Modifier::UNDERLINED);
+                }
+            }
+        }
+    }
 }
 fn hit(x: u16, y: u16, w: u16, h: u16, a: &App, count: usize) -> Option<(u8, usize)> {
     if w < 90 || h < 24 {
@@ -1115,6 +1131,16 @@ fn hit(x: u16, y: u16, w: u16, h: u16, a: &App, count: usize) -> Option<(u8, usi
     }
     if y == 0 && x >= w - 24 {
         return Some((8, 0));
+    }
+    if y == hint_row(w) && a.view < 2 {
+        let mut at = 1;
+        for (i, (t, key)) in hints(a.editing).iter().enumerate() {
+            let width = str_width(t);
+            if key.is_some() && x >= at && x < at + width {
+                return Some((15, i));
+            }
+            at += width + 2;
+        }
     }
     if y == 1 {
         for (i, (left, t)) in tabs(a.view).iter().enumerate() {
@@ -1177,7 +1203,7 @@ fn hit(x: u16, y: u16, w: u16, h: u16, a: &App, count: usize) -> Option<(u8, usi
         }
     }
     if y == bottom - 1 {
-        if (44..64).contains(&x) {
+        if (44..64).contains(&x) && a.collection.is_empty() {
             return Some((7, 0));
         }
         if (2..18).contains(&x) {
@@ -1681,8 +1707,9 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
             Event::Mouse(m) => {
                 let (w, h) = crossterm::terminal::size()?;
                 let target = hit(m.column, m.row, w, h, &a, rows.len());
-                if target != a.hover {
+                if target != a.hover || (target.is_some() && m.row != a.hover_row) {
                     a.hover = target;
+                    a.hover_row = m.row;
                     dirty = true
                 }
                 match m.kind {
@@ -1973,6 +2000,37 @@ mod tests {
         };
         let (_, _, _, bottom) = geometry(120, 30, 1);
         assert_eq!(hit(tabs[1].0, bottom - 1, 120, 30, &a, 3), Some((14, 1)));
+    }
+
+    #[test]
+    fn hovered_buttons_are_underlined_like_tabs() {
+        let root = crate::project_root().join("dev/content-library");
+        let (docs, _) = load(&root).unwrap();
+        let row = hint_row(120);
+        let x = hint_text(false).find("[Tab]").unwrap() as u16 + 2;
+        let mut a = App {
+            hover: hit(x, row, 120, 30, &App::default(), 1),
+            hover_row: row,
+            ..App::default()
+        };
+        assert_eq!(a.hover, Some((15, 1)));
+        let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+        terminal
+            .draw(|f| draw(f, &mut a, &docs, &[0], &Ai::default(), false))
+            .unwrap();
+        let buf = terminal.backend().buffer();
+        let start = hint_text(false).find("[Tab]").unwrap() as u16 + 1;
+        // The whole "[Tab] Category" entry is underlined, its neighbours are not.
+        for x in start..start + str_width("[Tab] Category") {
+            assert!(
+                buf[(x, row)].modifier.contains(Modifier::UNDERLINED),
+                "x={x}"
+            );
+        }
+        assert!(!buf[(start - 2, row)]
+            .modifier
+            .contains(Modifier::UNDERLINED));
+        assert!(!buf[(1, row)].modifier.contains(Modifier::UNDERLINED));
     }
 
     #[test]
