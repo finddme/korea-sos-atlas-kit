@@ -48,7 +48,7 @@ flatpak run --user --unshare=network --filesystem="$PWD" --command=bash org.kde.
 
 앱은 지도 파일(`maps.json`)과 지도 프로그램의 해시를 확인한 뒤에만 지도를 연다. 맞지 않으면 다른 프로그램으로 조용히 대체하지 않고 오류를 표시한다. Linux는 네트워크를 차단한 샌드박스에서 실행한다. Windows는 관리자 권한 없이 실행해야 해서 운영체제 방화벽 대신 지도 프로그램 안에서 네트워크를 끈다. 키트가 `SOS_ATLAS_OFFLINE=1`로 실행하면 모든 HTTP 요청이 소켓을 열기 전에 실패하고(`libs/platform/atlas_offline.hpp`, `http_client_qt.cpp`), 지도 내려받기 단추·환영 화면·내려받기/재시도 단추가 사라진다. 키트에 없는 지역은 "오프라인 키트에 들어 있지 않습니다"라고만 표시한다. 지도 보기·검색·경로 계산에는 네트워크가 필요하지 않다.
 
-그래픽 드라이버가 없거나 OpenGL 3.2를 지원하지 않는 PC에서는 지도 엔진(drape)이 그릴 수 없다. drape는 `opengl32.dll`을 직접 호출하므로 Qt의 `opengl32sw.dll`로는 그리지 못하고 흰 화면이 된다. 그래서 패치는 지도 창을 만들 때 `opengl32.dll`이 쓸 만한 OpenGL 3.2 이상을 주는지 확인하고, 아니면 코드 75로 종료한다. 앱은 시작 20초 안의 비정상 종료를 감지하면 `SOS_ATLAS_SOFTWARE_GL=1`로 한 번 다시 연다. 이때 지도 프로그램은 `opengl32.dll`을 지연 로드하도록 빌드돼 있어서, 무엇보다 먼저 `mesa/opengl32.dll`(Mesa llvmpipe)을 같은 이름으로 불러 drape와 Qt가 모두 CPU 렌더러를 쓴다. 앱은 상태 폴더에 `opengl-software` 파일을 남겨 다음부터 바로 CPU 렌더링으로 연다. 이 파일을 지우면 다시 그래픽 카드를 쓴다.
+그래픽 드라이버가 없거나 OpenGL 3.2를 지원하지 않는 PC에서는 지도 엔진(drape)이 그릴 수 없다. drape는 `opengl32.dll`을 직접 호출하므로 Qt의 `opengl32sw.dll`로는 그리지 못하고 흰 화면이 된다. 그래서 패치는 지도 창을 만들 때 `opengl32.dll`이 쓸 만한 OpenGL 3.2 이상을 주는지 확인하고, 아니면 코드 75로 종료한다. 앱은 시작 20초 안의 비정상 종료를 감지하면 `SOS_ATLAS_SOFTWARE_GL=1`로 한 번 다시 연다. 이때 지도 프로그램은 `opengl32.dll`을 지연 로드하도록 빌드돼 있어서, 무엇보다 먼저 `mesa/opengl32.dll`(Mesa)을 같은 이름으로 불러(앱이 `GALLIUM_DRIVER=llvmpipe`를 함께 줘서 그래픽 드라이버가 필요한 D3D12 경로 대신 CPU 렌더러 llvmpipe를 쓴다) drape와 Qt가 모두 CPU 렌더러를 쓴다. 앱은 상태 폴더에 `opengl-software` 파일을 남겨 다음부터 바로 CPU 렌더링으로 연다. 이 파일을 지우면 다시 그래픽 카드를 쓴다.
 
 ## 위치 수신 범위
 

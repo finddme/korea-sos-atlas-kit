@@ -295,7 +295,10 @@ fn spawn_viewer(root: &Path, software: bool) -> Result<(std::process::Child, Pat
     let (mut cmd, log) = command(root)?;
     if software {
         // The patched viewer loads mesa/opengl32.dll (qt/main.cpp, LoadAtlasSoftwareGL).
-        cmd.env("SOS_ATLAS_SOFTWARE_GL", "1");
+        cmd.env("SOS_ATLAS_SOFTWARE_GL", "1")
+            // Mesa would otherwise prefer its D3D12 driver, which still needs a
+            // working graphics driver; llvmpipe renders on the CPU only.
+            .env("GALLIUM_DRIVER", "llvmpipe");
     }
     Ok((cmd.spawn()?, log))
 }
