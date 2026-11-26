@@ -38,10 +38,10 @@ index 9cba4a4ae8..f554490ac4 100644
  
 diff --git a/qt/atlas_ko.json b/qt/atlas_ko.json
 new file mode 100644
-index 0000000000..f45e716bb3
+index 0000000000..d92a5fdadb
 --- /dev/null
 +++ b/qt/atlas_ko.json
-@@ -0,0 +1,127 @@
+@@ -0,0 +1,128 @@
 +{
 +  "Route and location": "경로 · 현재 위치",
 +  "GPS: no position received": "GPS 위치 미수신 · 수동 출발지 선택 가능",
@@ -167,7 +167,8 @@ index 0000000000..f45e716bb3
 +  "Distance from: selected place": "거리 기준: 검색·선택한 장소",
 +  "Distance from: selected place (%1)": "거리 기준: 검색·선택한 장소 (%1)",
 +  "Start and destination": "출발지 · 목적지",
-+  "Choose a place in the search results, the nearby shelters list or on the map, then use its Start or Destination button.": "검색 결과, 가까운 대피시설 목록, 지도에서 장소를 고른 뒤 출발지·목적지 버튼을 누르세요."
++  "Choose a place in the search results, the nearby shelters list or on the map, then use its Start or Destination button.": "검색 결과, 가까운 대피시설 목록, 지도에서 장소를 고른 뒤 출발지·목적지 버튼을 누르세요.",
++  "Railway or subway station": "지하철·기차역"
 +}
 diff --git a/qt/atlas_location.hpp b/qt/atlas_location.hpp
 new file mode 100644
@@ -206,10 +207,10 @@ index 0000000000..ab08120804
 +int main() {}
 diff --git a/qt/atlas_navigation.cpp b/qt/atlas_navigation.cpp
 new file mode 100644
-index 0000000000..d33f393b82
+index 0000000000..47101656ea
 --- /dev/null
 +++ b/qt/atlas_navigation.cpp
-@@ -0,0 +1,242 @@
+@@ -0,0 +1,245 @@
 +// Korea SOS Atlas Kit modification, 2026-11-14. Apache-2.0; upstream notices retained.
 +#include "qt/mainwindow.hpp"
 +#include "qt/atlas_location.hpp"
@@ -339,6 +340,9 @@ index 0000000000..d33f393b82
 +    else nearby->hide();
 +  });
 +  connect(nearby, &QDockWidget::visibilityChanged, nearbyAction, &QAction::setChecked);
++  // Search shares the tab area: a click on its button only showed it (it was already shown,
++  // behind the nearby tab), so also bring it to the front.
++  connect(m_pSearchAction, &QAction::triggered, this, [this](bool on) { if (on) m_Docks[kSearchDock]->raise(); });
 +  for (auto * bar : findChildren<QToolBar *>())
 +  {
 +    auto const actions = bar->actions();
@@ -1272,23 +1276,31 @@ index fcba6ad092..dbadda2637 100644
          <file>search.png</file>
          <file>up.png</file>
 diff --git a/qt/search_panel.cpp b/qt/search_panel.cpp
-index 65eff2ceb7..40db1921e0 100644
+index 65eff2ceb7..85bee8f0e8 100644
 --- a/qt/search_panel.cpp
 +++ b/qt/search_panel.cpp
-@@ -1,3 +1,4 @@
+@@ -1,14 +1,20 @@
 +// Modified by Korea SOS Atlas Kit, 2026-11-14: Korean usability improvements. Original license retained.
  #include "qt/search_panel.hpp"
  #include "qt/draw_widget.hpp"
  
-@@ -9,6 +10,7 @@
+ #include "search/search_params.hpp"
+ 
++#include "indexer/classificator.hpp"
++
+ #include "map/bookmark_manager.hpp"
+ #include "map/framework.hpp"
+ 
  #include "base/assert.hpp"
  
++#include <algorithm>
++
  #include <QtCore/QTimer>
 +#include <QtCore/QLocale>
  #include <QtGui/QGuiApplication>
  #include <QtWidgets/QButtonGroup>
  #include <QtWidgets/QCheckBox>
-@@ -33,6 +35,9 @@ SearchPanel::SearchPanel(DrawWidget * drawWidget, QWidget * parent)
+@@ -33,6 +39,9 @@ SearchPanel::SearchPanel(DrawWidget * drawWidget, QWidget * parent)
    , m_timestamp(0)
  {
    m_pEditor = new QLineEdit(this);
@@ -1298,7 +1310,7 @@ index 65eff2ceb7..40db1921e0 100644
    connect(m_pEditor, &QLineEdit::textChanged, this, &SearchPanel::OnSearchTextChanged);
  
    m_pTable = new QTableWidget(0, 4 /*columns*/, this);
-@@ -43,6 +48,9 @@ SearchPanel::SearchPanel(DrawWidget * drawWidget, QWidget * parent)
+@@ -43,6 +52,9 @@ SearchPanel::SearchPanel(DrawWidget * drawWidget, QWidget * parent)
    m_pTable->verticalHeader()->setVisible(false);
    m_pTable->horizontalHeader()->setVisible(false);
    m_pTable->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
@@ -1308,7 +1320,7 @@ index 65eff2ceb7..40db1921e0 100644
  
    connect(m_pTable, &QTableWidget::cellClicked, this, &SearchPanel::OnSearchPanelItemClicked);
  
-@@ -61,6 +69,7 @@ SearchPanel::SearchPanel(DrawWidget * drawWidget, QWidget * parent)
+@@ -61,6 +73,7 @@ SearchPanel::SearchPanel(DrawWidget * drawWidget, QWidget * parent)
    searchModeButtons->addButton(buttonE, static_cast<int>(search::Mode::Everywhere));
    QRadioButton * buttonV = new QRadioButton(tr("Viewport"));
    modeLayout->addWidget(buttonV);
@@ -1316,7 +1328,7 @@ index 65eff2ceb7..40db1921e0 100644
    searchModeButtons->addButton(buttonV, static_cast<int>(search::Mode::Viewport));
    groupBox->setLayout(modeLayout);
    groupBox->setFlat(true);
-@@ -69,6 +78,7 @@ SearchPanel::SearchPanel(DrawWidget * drawWidget, QWidget * parent)
+@@ -69,6 +82,7 @@ SearchPanel::SearchPanel(DrawWidget * drawWidget, QWidget * parent)
  
    m_isCategory = new QCheckBox(tr("Category request"));
    m_isCategory->setCheckState(Qt::Unchecked);
@@ -1324,7 +1336,7 @@ index 65eff2ceb7..40db1921e0 100644
    connect(m_isCategory, &QCheckBox::stateChanged, std::bind(&SearchPanel::RunSearch, this));
  
    QHBoxLayout * requestLayout = new QHBoxLayout();
-@@ -76,8 +86,12 @@ SearchPanel::SearchPanel(DrawWidget * drawWidget, QWidget * parent)
+@@ -76,14 +90,38 @@ SearchPanel::SearchPanel(DrawWidget * drawWidget, QWidget * parent)
    requestLayout->addWidget(m_pClearButton);
    QVBoxLayout * verticalLayout = new QVBoxLayout();
    verticalLayout->addWidget(groupBox);
@@ -1337,7 +1349,69 @@ index 65eff2ceb7..40db1921e0 100644
    verticalLayout->addWidget(m_pTable);
    setLayout(verticalLayout);
  }
-@@ -172,7 +186,10 @@ void SearchPanel::OnEverywhereSearchResults(uint64_t timestamp, search::Results
+ 
+ namespace
+ {
++// "강남역" -> "강남"; empty unless the query is one word ending in 역.
++std::string AtlasStationStem(QString const & text)
++{
++  auto const t = text.trimmed();
++  if (t.size() < 2 || t.contains(' ') || !t.endsWith(QString::fromUtf8("역")))
++    return {};
++  return t.chopped(1).toStdString();
++}
++
++bool IsAtlasStation(search::Result const & r, std::string const & stem)
++{
++  if (r.GetResultType() != search::Result::Type::Feature)
++    return false;
++  auto const & name = r.GetString();
++  if (name != stem && name != stem + "역")
++    return false;
++  auto const type = classif().GetReadableObjectName(r.GetFeatureType());
++  return type.starts_with("railway-station") || type.starts_with("railway-halt");
++}
++
+ QTableWidgetItem * CreateItem(std::string const & s)
+ {
+   QTableWidgetItem * item = new QTableWidgetItem(QString::fromStdString(s));
+@@ -129,6 +167,26 @@ void SearchPanel::OnEverywhereSearchResults(uint64_t timestamp, search::Results
+     return;
+ 
+   m_results = std::move(results);
++  if (!m_stations.empty())
++  {
++    search::Results merged;
++    for (auto station : m_stations)
++      merged.AddResultNoChecks(std::move(station));
++    for (auto const & r : m_results)
++    {
++      bool const duplicate = r.GetResultType() == search::Result::Type::Feature &&
++                             std::any_of(m_stations.cbegin(), m_stations.cend(), [&r](search::Result const & s)
++                             { return s.GetFeatureID() == r.GetFeatureID(); });
++      if (!duplicate)
++      {
++        auto copy = r;
++        merged.AddResultNoChecks(std::move(copy));
++      }
++    }
++    if (m_results.IsEndMarker())
++      merged.SetEndMarker(m_results.IsEndedCancelled());
++    m_results = std::move(merged);
++  }
+   ClearTable();
+ 
+   for (auto const & res : m_results)
+@@ -150,6 +208,8 @@ void SearchPanel::OnEverywhereSearchResults(uint64_t timestamp, search::Results
+ 
+     int const rowCount = m_pTable->rowCount();
+     m_pTable->insertRow(rowCount);
++    if (static_cast<size_t>(rowCount) < m_stations.size())  // Korea SOS Atlas Kit: name alone ("강남") is unclear
++      strHigh.append(" <font color=\"gray\">· " + tr("Railway or subway station") + "</font>");
+     m_pTable->setCellWidget(rowCount, 1, new QLabel(strHigh));
+     m_pTable->setItem(rowCount, 2, CreateItem(res.GetAddress()));
+ 
+@@ -172,7 +232,10 @@ void SearchPanel::OnEverywhereSearchResults(uint64_t timestamp, search::Results
    GetFramework().FillSearchResultsMarks(true /* clear */, m_results);
  
    if (m_results.IsEndMarker())
@@ -1348,7 +1422,7 @@ index 65eff2ceb7..40db1921e0 100644
  }
  
  bool SearchPanel::Try3dModeCmd(std::string const & str)
-@@ -211,7 +228,7 @@ std::string SearchPanel::GetCurrentInputLocale()
+@@ -211,7 +274,7 @@ std::string SearchPanel::GetCurrentInputLocale()
    // Hardcode search input language.
    // return "de";
  
@@ -1357,7 +1431,7 @@ index 65eff2ceb7..40db1921e0 100644
    loc.replace('_', '-');
    auto res = loc.toStdString();
    if (CategoriesHolder::MapLocaleToInteger(res) < 0)
-@@ -235,6 +252,9 @@ void SearchPanel::OnSearchTextChanged(QString const & str)
+@@ -235,6 +298,9 @@ void SearchPanel::OnSearchTextChanged(QString const & str)
  
    if (normalized.empty())
    {
@@ -1367,16 +1441,80 @@ index 65eff2ceb7..40db1921e0 100644
      GetFramework().GetSearchAPI().CancelAllSearches();
  
      // hide X button
+@@ -248,16 +314,46 @@ void SearchPanel::OnSearchTextChanged(QString const & str)
+   using namespace search;
+   if (m_mode == Mode::Everywhere)
+   {
+-    EverywhereSearchParams params{normalized,
+-                                  GetCurrentInputLocale(),
+-                                  {} /* timeout */,
+-                                  isCategory,
+-                                  // m_onResults
+-                                  [this, timestamp](Results results, std::vector<ProductInfo> /* productInfo */)
+-    { OnEverywhereSearchResults(timestamp, std::move(results)); }};
+-
+-    if (GetFramework().GetSearchAPI().SearchEverywhere(std::move(params)))
+-      StartBusyIndicator();
++    m_stations.clear();
++    auto const runMain = [this, normalized, isCategory, timestamp]
++    {
++      EverywhereSearchParams params{normalized,
++                                    GetCurrentInputLocale(),
++                                    {} /* timeout */,
++                                    isCategory,
++                                    // m_onResults
++                                    [this, timestamp](Results results, std::vector<ProductInfo> /* productInfo */)
++      { OnEverywhereSearchResults(timestamp, std::move(results)); }};
++
++      if (GetFramework().GetSearchAPI().SearchEverywhere(std::move(params)))
++        StartBusyIndicator();
++    };
++    // Korea SOS Atlas Kit: OpenStreetMap names Korean stations without "역" (강남역 is "강남"),
++    // so "강남역" only finds exits, bus stops and shops. For a query ending in 역, first look
++    // up stations named after the stem and list them above the normal results.
++    auto const stem = AtlasStationStem(str);
++    if (stem.empty())
++      runMain();
++    else
++    {
++      EverywhereSearchParams params{stem + " ",
++                                    GetCurrentInputLocale(),
++                                    {} /* timeout */,
++                                    false /* isCategory */,
++                                    [this, timestamp, stem, runMain](Results results, std::vector<ProductInfo> /* productInfo */)
++      {
++        if (timestamp != m_timestamp || !results.IsEndMarker())
++          return;
++        for (auto const & r : results)
++          if (IsAtlasStation(r, stem))
++            m_stations.push_back(r);
++        runMain();
++      }};
++      if (GetFramework().GetSearchAPI().SearchEverywhere(std::move(params)))
++        StartBusyIndicator();
++      else
++        runMain();
++    }
+   }
+   else if (m_mode == Mode::Viewport)
+   {
 diff --git a/qt/search_panel.hpp b/qt/search_panel.hpp
-index 6878ce9fa5..f2a805f707 100644
+index 6878ce9fa5..1dd1b259a4 100644
 --- a/qt/search_panel.hpp
 +++ b/qt/search_panel.hpp
-@@ -1,3 +1,4 @@
+@@ -1,8 +1,11 @@
 +// Modified by Korea SOS Atlas Kit, 2026-11-14. Original Apache-2.0 license retained.
  #pragma once
  
  #include "search/mode.hpp"
-@@ -11,6 +12,7 @@
+ #include "search/result.hpp"
+ 
++#include <vector>
++
+ #include "base/thread_checker.hpp"
+ 
+ #include <QtGui/QIcon>
+@@ -11,6 +14,7 @@
  
  class QCheckBox;
  class QLineEdit;
@@ -1384,7 +1522,7 @@ index 6878ce9fa5..f2a805f707 100644
  class QPushButton;
  class QTableWidget;
  class QTimer;
-@@ -26,6 +28,7 @@ class SearchPanel : public QWidget
+@@ -26,6 +30,7 @@ class SearchPanel : public QWidget
    DrawWidget * m_pDrawWidget;
    QTableWidget * m_pTable;
    QLineEdit * m_pEditor;
@@ -1392,3 +1530,11 @@ index 6878ce9fa5..f2a805f707 100644
    QPushButton * m_pClearButton;
    QTimer * m_pAnimationTimer;
    QCheckBox * m_isCategory;
+@@ -34,6 +39,7 @@ class SearchPanel : public QWidget
+   QPixmap m_busyIcon;
+ 
+   search::Results m_results;
++  std::vector<search::Result> m_stations;  // Korea SOS Atlas Kit: "…역" lookups
+ 
+   search::Mode m_mode;
+   uint64_t m_timestamp;
