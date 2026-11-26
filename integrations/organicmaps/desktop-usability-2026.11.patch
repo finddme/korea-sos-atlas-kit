@@ -137,10 +137,10 @@ index 748fd0bbb4..476786e769 100644
  
 diff --git a/qt/atlas_ko.json b/qt/atlas_ko.json
 new file mode 100644
-index 0000000000..31efa34443
+index 0000000000..c07f24d137
 --- /dev/null
 +++ b/qt/atlas_ko.json
-@@ -0,0 +1,205 @@
+@@ -0,0 +1,207 @@
 +{
 +  "Route and location": "경로 · 현재 위치",
 +  "GPS: no position received": "GPS 위치 미수신 · 수동 출발지 선택 가능",
@@ -344,7 +344,9 @@ index 0000000000..31efa34443
 +  "Distance from: map centre. Move the map to search another area.": "거리 기준: 지도 중심. 지도를 옮기면 그 주변으로 다시 찾습니다.",
 +  "Shelters and water points near the searched place or the map centre": "검색한 장소(없으면 지도 중심) 근처의 대피소·급수시설",
 +  "Distance from: selected place": "거리 기준: 검색·선택한 장소",
-+  "Distance from: selected place (%1)": "거리 기준: 검색·선택한 장소 (%1)"
++  "Distance from: selected place (%1)": "거리 기준: 검색·선택한 장소 (%1)",
++  "Start and destination": "출발지 · 목적지",
++  "Choose a place in the search results, the nearby shelters list or on the map, then use its Start or Destination button.": "검색 결과, 가까운 대피시설 목록, 지도에서 장소를 고른 뒤 출발지·목적지 버튼을 누르세요."
 +}
 diff --git a/qt/atlas_location.hpp b/qt/atlas_location.hpp
 new file mode 100644
@@ -383,10 +385,10 @@ index 0000000000..ab08120804
 +int main() {}
 diff --git a/qt/atlas_navigation.cpp b/qt/atlas_navigation.cpp
 new file mode 100644
-index 0000000000..0d91368fbd
+index 0000000000..9e4c88ef26
 --- /dev/null
 +++ b/qt/atlas_navigation.cpp
-@@ -0,0 +1,233 @@
+@@ -0,0 +1,243 @@
 +// Korea SOS Atlas Kit modification, 2026-11-14. Apache-2.0; upstream notices retained.
 +#include "qt/mainwindow.hpp"
 +#include "qt/atlas_location.hpp"
@@ -525,6 +527,10 @@ index 0000000000..0d91368fbd
 +    bar->insertAction(i + 1 < actions.size() ? actions[i + 1] : nullptr, nearbyAction);
 +    break;
 +  }
++  // The place panel stays below the lists (see HidePlacePage) with the route points or a hint.
++  m_Docks[kPlacePageDock]->setFeatures(QDockWidget::NoDockWidgetFeatures);
++  HidePlacePage();
++  resizeDocks({m_Docks[kSearchDock], m_Docks[kPlacePageDock]}, {3, 2}, Qt::Vertical);
 +  auto * timer = new QTimer(this);
 +  connect(timer, &QTimer::timeout, this, &MainWindow::UpdateAtlasNavigation);
 +  timer->start(1000);
@@ -569,6 +575,12 @@ index 0000000000..0d91368fbd
 +    if (p.m_pointType == RouteMarkType::Finish) finish = name;
 +  }
 +  m_atlasEndpoints->setText(tr("Start: %1\nDestination: %2").arg(start, finish));
++  if (auto * hint = qobject_cast<QLabel *>(m_Docks[kPlacePageDock]->widget()); hint && hint->objectName() == "atlasPlaceHint")
++  {
++    auto const text = tr("Start: %1\nDestination: %2").arg(start, finish) + "\n\n" +
++                      tr("Choose a place in the search results, the nearby shelters list or on the map, then use its Start or Destination button.");
++    if (hint->text() != text) hint->setText(text);
++  }
 +  {
 +    auto const selected = m_atlasMode->findData(static_cast<int>(rm.GetRouter()));
 +    if (selected >= 0 && selected != m_atlasMode->currentIndex())
@@ -1175,7 +1187,7 @@ index 499cb5bd19..a900a6496f 100644
  
    LOG(LINFO, ("Organic Maps", platform.Version(), "built with QT:", QT_VERSION_STR, "runtime QT:", qVersion(),
 diff --git a/qt/mainwindow.cpp b/qt/mainwindow.cpp
-index e027743149..be050061f9 100644
+index e027743149..07fad20011 100644
 --- a/qt/mainwindow.cpp
 +++ b/qt/mainwindow.cpp
 @@ -1,4 +1,7 @@
@@ -1258,7 +1270,17 @@ index e027743149..be050061f9 100644
      pToolBar->addAction(QIcon(":/navig64/clear-route.png"), Tr("clear_route"), this, SLOT(OnClearRoute()));
      pToolBar->addAction(QIcon(":/navig64/settings-routing.png"), Tr("routing_settings"), this,
                          SLOT(OnRoutingSettings()));
-@@ -425,8 +438,11 @@ void MainWindow::CreateNavigationBar()
+@@ -352,7 +365,8 @@ void MainWindow::CreateNavigationBar()
+ 
+     toolBtn = m_selection->create();
+     toolBtn->setToolTip(Tr("selection_mode_mouse_tooltip"));
+-    pToolBar->addWidget(toolBtn);
++    // Korea SOS Atlas Kit: developer selection modes, hidden (it looked like an empty button).
++    pToolBar->addWidget(toolBtn)->setVisible(false);
+ 
+     pToolBar->addAction(QIcon(":/navig64/clear.png"), Tr("clear"), this, SLOT(OnClearSelection()));
+ 
+@@ -425,8 +439,11 @@ void MainWindow::CreateNavigationBar()
    qt::common::ScaleSlider::Embed(Qt::Vertical, *pToolBar, *m_pDrawWidget);
  
  #ifndef NO_DOWNLOADER
@@ -1272,7 +1294,7 @@ index e027743149..be050061f9 100644
  #endif  // NO_DOWNLOADER
  
    if (m_screenshotMode)
-@@ -478,6 +494,14 @@ void MainWindow::CreateCountryStatusControls()
+@@ -478,6 +495,14 @@ void MainWindow::CreateCountryStatusControls()
      auto const status = attrs.m_status;
      auto const countryName = QString::fromStdString(storage.GetNodeLocalName(countryId));
  
@@ -1287,7 +1309,7 @@ index e027743149..be050061f9 100644
      if (status == storage::NodeStatus::NotDownloaded)
      {
        m_downloadButton->setVisible(true);
-@@ -536,6 +560,9 @@ void MainWindow::OnLocationError(location::TLocationError errorCode)
+@@ -536,6 +561,9 @@ void MainWindow::OnLocationError(location::TLocationError errorCode)
  {
    ASSERT_NOT_EQUAL(errorCode, location::ENoError, ());
    LOG(LWARNING, ("Location error:", errorCode));
@@ -1297,7 +1319,7 @@ index e027743149..be050061f9 100644
  
    // Keep "My position" enabled so the user can retry after fixing the cause.
    if (m_pDrawWidget != nullptr)
-@@ -544,6 +571,10 @@ void MainWindow::OnLocationError(location::TLocationError errorCode)
+@@ -544,6 +572,10 @@ void MainWindow::OnLocationError(location::TLocationError errorCode)
  
  void MainWindow::OnLocationUpdated(location::GpsInfo const & info)
  {
@@ -1308,7 +1330,7 @@ index e027743149..be050061f9 100644
    m_pDrawWidget->GetFramework().OnLocationUpdate(info);
  }
  
-@@ -802,12 +833,14 @@ void MainWindow::CreateSearchBarAndPanel()
+@@ -802,12 +834,14 @@ void MainWindow::CreateSearchBarAndPanel()
  {
    CreatePanelImpl(kSearchDock, Qt::RightDockWidgetArea, Tr("search"), QKeySequence(), nullptr);
  
@@ -1324,7 +1346,7 @@ index e027743149..be050061f9 100644
  
    // Deactivate map selection whenever the panel is hidden (X button on dock, action button, etc.).
    connect(m_Docks[kPlacePageDock], &QDockWidget::visibilityChanged, this, [this](bool visible)
-@@ -838,6 +871,7 @@ void MainWindow::ShowPlacePage(place_page::Info const & info)
+@@ -838,11 +872,25 @@ void MainWindow::ShowPlacePage(place_page::Info const & info)
    dock->setWidget(widget);
    dock->show();
    dock->raise();
@@ -1332,6 +1354,25 @@ index e027743149..be050061f9 100644
  }
  
  void MainWindow::HidePlacePage()
+ {
+-  m_Docks[kPlacePageDock]->hide();
++  // Korea SOS Atlas Kit: keep the panel where it is, so the search and nearby lists keep
++  // their size and the Start/Destination buttons come back in the same place. The panel shows
++  // the chosen route points instead (filled in by UpdateAtlasNavigation).
++  QDockWidget * dock = m_Docks[kPlacePageDock];
++  auto * hint = new QLabel(dock);
++  hint->setObjectName("atlasPlaceHint");
++  hint->setWordWrap(true);
++  hint->setAlignment(Qt::AlignTop | Qt::AlignLeft);
++  hint->setMargin(10);
++  dock->setWindowTitle(tr("Start and destination"));
++  dock->setWidget(hint);
++  dock->show();
++  GetFramework().DeactivateMapSelection();
++  UpdateAtlasNavigation();
+ }
+ 
+ void MainWindow::CreatePanelImpl(size_t i, Qt::DockWidgetArea area, QString const & name, QKeySequence const & hotkey,
 diff --git a/qt/mainwindow.hpp b/qt/mainwindow.hpp
 index d879a0645d..dc908b9312 100644
 --- a/qt/mainwindow.hpp
