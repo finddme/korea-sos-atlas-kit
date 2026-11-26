@@ -1,3 +1,18 @@
+diff --git a/libs/drape_frontend/selection_shape_generator.cpp b/libs/drape_frontend/selection_shape_generator.cpp
+index f9fab06282..c788f7ed4b 100644
+--- a/libs/drape_frontend/selection_shape_generator.cpp
++++ b/libs/drape_frontend/selection_shape_generator.cpp
+@@ -113,7 +113,9 @@ void GenerateJoinsTriangles(glsl::vec3 const & pivot, std::vector<glsl::vec2> co
+ // static
+ dp::Color SelectionShapeGenerator::GetSelectionColor()
+ {
+-  return df::GetColorConstant("Selection");
++  // Korea SOS Atlas Kit modification, 2026-11-26: magenta instead of the style's blue, so the
++  // chosen place stands out from the blue search-result pins and water-point markers.
++  return dp::Color(0xE6, 0x00, 0x7E, df::GetColorConstant("Selection").GetAlpha());
+ }
+ 
+ // static
 diff --git a/qt/CMakeLists.txt b/qt/CMakeLists.txt
 index 8bb67b99c2..33562868fd 100644
 --- a/qt/CMakeLists.txt

@@ -11,8 +11,8 @@
   "parallel_jobs": 2,
   "map_version": 260527,
   "status": "desktop build and isolated offline GUI verification passed; physical GNSS validation blocked by absent receiver",
-  "viewer_sha256": "e8ea7e3bbffb02caced78513cb0b17c437ff0068cccfa78959653449bdb58767",
-  "patch_sha256": "a959908a037b5fa2a709cb7b4f333f20406241775dbe0fb9a04a3b839fd1c3a3",
+  "viewer_sha256": "fa1ece9a559ec670dd3267f38c3cb26c57451b246b7ba7625cfcb73a97b07722",
+  "patch_sha256": "8e5887f1e6bb92c572d1a7432c3d57888545200f18640a8a3de1cc8de2ae32ed",
   "qt_version": "6.10.3",
   "evidence": "dev/poc/maps-ui/evidence"
 }
