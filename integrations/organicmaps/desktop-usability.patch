@@ -38,10 +38,10 @@ index 9cba4a4ae8..f554490ac4 100644
  
 diff --git a/qt/atlas_ko.json b/qt/atlas_ko.json
 new file mode 100644
-index 0000000000..74338aba6c
+index 0000000000..57c9b6356f
 --- /dev/null
 +++ b/qt/atlas_ko.json
-@@ -0,0 +1,122 @@
+@@ -0,0 +1,125 @@
 +{
 +  "Route and location": "경로 · 현재 위치",
 +  "GPS: no position received": "GPS 위치 미수신 · 수동 출발지 선택 가능",
@@ -162,7 +162,10 @@ index 0000000000..74338aba6c
 +  "Distance from: route start": "거리 기준: 출발지",
 +  "Distance from: route start (%1)": "거리 기준: 출발지 (%1)",
 +  "Distance from: current position (GPS)": "거리 기준: 현재 위치 (GPS)",
-+  "Distance from: map centre. Move the map to search another area.": "거리 기준: 지도 중심. 지도를 옮기면 그 주변으로 다시 찾습니다."
++  "Distance from: map centre. Move the map to search another area.": "거리 기준: 지도 중심. 지도를 옮기면 그 주변으로 다시 찾습니다.",
++  "Shelters and water points near the searched place or the map centre": "검색한 장소(없으면 지도 중심) 근처의 대피소·급수시설",
++  "Distance from: selected place": "거리 기준: 검색·선택한 장소",
++  "Distance from: selected place (%1)": "거리 기준: 검색·선택한 장소 (%1)"
 +}
 diff --git a/qt/atlas_location.hpp b/qt/atlas_location.hpp
 new file mode 100644
@@ -201,10 +204,10 @@ index 0000000000..ab08120804
 +int main() {}
 diff --git a/qt/atlas_navigation.cpp b/qt/atlas_navigation.cpp
 new file mode 100644
-index 0000000000..6cafa14576
+index 0000000000..8e319cde0e
 --- /dev/null
 +++ b/qt/atlas_navigation.cpp
-@@ -0,0 +1,215 @@
+@@ -0,0 +1,232 @@
 +// Korea SOS Atlas Kit modification, 2026-11-14. Apache-2.0; upstream notices retained.
 +#include "qt/mainwindow.hpp"
 +#include "qt/atlas_location.hpp"
@@ -220,6 +223,7 @@ index 0000000000..6cafa14576
 +#include <QtCore/QJsonObject>
 +#include <cmath>
 +#include <QtWidgets/QComboBox>
++#include <QtWidgets/QToolBar>
 +#include <QtWidgets/QDockWidget>
 +#include <QtWidgets/QLabel>
 +#include <QtWidgets/QListWidget>
@@ -323,8 +327,24 @@ index 0000000000..6cafa14576
 +  auto * nearby = CreateAtlasNearby(this, GetFramework());
 +  addDockWidget(Qt::RightDockWidgetArea, nearby);
 +  tabifyDockWidget(m_Docks[kSearchDock], nearby);
-+  nearby->show();
-+  nearby->raise();
++  nearby->hide();  // search first; the toolbar button opens the list
++  auto * nearbyAction = new QAction(AtlasShelterIcon(), tr("Nearby shelters"), this);
++  nearbyAction->setCheckable(true);
++  nearbyAction->setToolTip(tr("Shelters and water points near the searched place or the map centre"));
++  connect(nearbyAction, &QAction::triggered, this, [nearby](bool on)
++  {
++    if (on) { nearby->show(); nearby->raise(); }
++    else nearby->hide();
++  });
++  connect(nearby, &QDockWidget::visibilityChanged, nearbyAction, &QAction::setChecked);
++  for (auto * bar : findChildren<QToolBar *>())
++  {
++    auto const actions = bar->actions();
++    auto const i = actions.indexOf(m_pSearchAction);
++    if (i < 0) continue;
++    bar->insertAction(i + 1 < actions.size() ? actions[i + 1] : nullptr, nearbyAction);
++    break;
++  }
 +  auto * timer = new QTimer(this);
 +  connect(timer, &QTimer::timeout, this, &MainWindow::UpdateAtlasNavigation);
 +  timer->start(1000);
@@ -422,16 +442,17 @@ index 0000000000..6cafa14576
 +} // namespace qt
 diff --git a/qt/atlas_nearby.cpp b/qt/atlas_nearby.cpp
 new file mode 100644
-index 0000000000..a2fcbdba02
+index 0000000000..016f2660fc
 --- /dev/null
 +++ b/qt/atlas_nearby.cpp
-@@ -0,0 +1,282 @@
+@@ -0,0 +1,335 @@
 +// Korea SOS Atlas Kit modification, 2026-11-26. Apache-2.0; upstream notices retained.
 +#include "qt/atlas_nearby.hpp"
 +
 +#include "map/bookmark.hpp"
 +#include "map/bookmark_manager.hpp"
 +#include "map/framework.hpp"
++#include "map/place_page_info.hpp"
 +#include "map/routing_mark.hpp"
 +
 +#include "geometry/distance_on_sphere.hpp"
@@ -439,6 +460,10 @@ index 0000000000..a2fcbdba02
 +
 +#include <QtCore/QElapsedTimer>
 +#include <QtCore/QTimer>
++#include <QtGui/QIcon>
++#include <QtGui/QPainter>
++#include <QtGui/QPainterPath>
++#include <QtGui/QPixmap>
 +#include <QtWidgets/QComboBox>
 +#include <QtWidgets/QDockWidget>
 +#include <QtWidgets/QLabel>
@@ -568,7 +593,22 @@ index 0000000000..a2fcbdba02
 +      return;
 +    }
 +
-+    // Origin: the chosen route start, else the device position, else the map centre.
++    // The place the user searched for or clicked on the map. Facilities picked from this list
++    // do not replace it, so the list keeps its origin while the user looks through it.
++    if (!m_framework.HasPlacePageInfo())
++      m_selected.reset();
++    else
++    {
++      auto const & info = m_framework.GetCurrentPlacePageInfo();
++      bool const facility = info.IsBookmark() && bm.GetCategoryName(info.GetBookmarkCategoryId()).starts_with(kListPrefix);
++      if (!facility)
++      {
++        m_selected = info.GetMercator();
++        m_selectedTitle = QString::fromStdString(info.GetTitle());
++      }
++    }
++
++    // Origin: the chosen route start, the selected place, the device position, the map centre.
 +    std::optional<m2::PointD> origin;
 +    QString label;
 +    for (auto const & p : m_framework.GetRoutingManager().GetRoutePoints())
@@ -579,6 +619,12 @@ index 0000000000..a2fcbdba02
 +      label = p.m_isMyPosition || p.m_title.empty() ? tr("Distance from: route start")
 +                                                    : tr("Distance from: route start (%1)")
 +                                                          .arg(QString::fromStdString(p.m_title));
++    }
++    if (!origin && m_selected)
++    {
++      origin = *m_selected;
++      label = m_selectedTitle.isEmpty() ? tr("Distance from: selected place")
++                                        : tr("Distance from: selected place (%1)").arg(m_selectedTitle);
 +    }
 +    if (!origin)
 +    {
@@ -694,9 +740,36 @@ index 0000000000..a2fcbdba02
 +  m2::PointD m_lastCenter;
 +  std::optional<m2::PointD> m_sortedAt;
 +  std::optional<m2::PointD> m_heldCenter;
++  std::optional<m2::PointD> m_selected;
++  QString m_selectedTitle;
 +  QElapsedTimer m_pickTimer;
 +};
 +}  // namespace
++
++QIcon AtlasShelterIcon()
++{
++  QPixmap pixmap(48, 48);
++  pixmap.fill(Qt::transparent);
++  QPainter p(&pixmap);
++  p.setRenderHint(QPainter::Antialiasing);
++  QPainterPath house;
++  house.moveTo(24, 5);
++  house.lineTo(44, 22);
++  house.lineTo(38, 22);
++  house.lineTo(38, 43);
++  house.lineTo(10, 43);
++  house.lineTo(10, 22);
++  house.lineTo(4, 22);
++  house.closeSubpath();
++  p.setPen(QPen(QColor(150, 20, 20), 2));
++  p.setBrush(QColor(214, 40, 40));
++  p.drawPath(house);
++  p.setPen(Qt::NoPen);
++  p.setBrush(Qt::white);
++  p.drawRect(21, 25, 6, 14);  // a plus sign: a place to go to
++  p.drawRect(17, 29, 14, 6);
++  return QIcon(pixmap);
++}
 +
 +QDockWidget * CreateAtlasNearby(QWidget * parent, Framework & framework)
 +{
@@ -710,22 +783,25 @@ index 0000000000..a2fcbdba02
 +}  // namespace qt
 diff --git a/qt/atlas_nearby.hpp b/qt/atlas_nearby.hpp
 new file mode 100644
-index 0000000000..faa41f746c
+index 0000000000..fe8b8f080b
 --- /dev/null
 +++ b/qt/atlas_nearby.hpp
-@@ -0,0 +1,13 @@
+@@ -0,0 +1,16 @@
 +// Korea SOS Atlas Kit modification, 2026-11-26. Apache-2.0; upstream notices retained.
 +#pragma once
 +
 +class Framework;
 +class QDockWidget;
++class QIcon;
 +class QWidget;
 +
 +namespace qt
 +{
 +// "Nearby shelters" panel: the kit's facility lists (saved places named "대피시설 · …")
-+// sorted by distance from the route start, a fresh GPS fix, or the map centre.
++// sorted by distance from the route start, the searched/selected place, GPS, or the map centre.
 +QDockWidget * CreateAtlasNearby(QWidget * parent, Framework & framework);
++// Toolbar icon for the panel (drawn, so no new resource file is needed).
++QIcon AtlasShelterIcon();
 +}  // namespace qt
 diff --git a/qt/atlas_ui.hpp b/qt/atlas_ui.hpp
 new file mode 100644
@@ -1013,7 +1089,7 @@ index 2c259960ad..3fe93d27a2 100644
    void CreatePlacePagePanel();
    void CreateCountryStatusControls();
 diff --git a/qt/place_page_dialog_common.cpp b/qt/place_page_dialog_common.cpp
-index fb1523e184..040e461026 100644
+index fb1523e184..8ab17a7268 100644
 --- a/qt/place_page_dialog_common.cpp
 +++ b/qt/place_page_dialog_common.cpp
 @@ -1,3 +1,4 @@
@@ -1031,11 +1107,18 @@ index fb1523e184..040e461026 100644
  #include <QtWidgets/QFrame>
  #include <QtWidgets/QGridLayout>
  #include <QtWidgets/QLabel>
-@@ -47,21 +51,23 @@ QToolBar * createActionToolBar(QWidget * parent, qt::DrawWidget * drawWidget, pl
+@@ -47,21 +51,31 @@ QToolBar * createActionToolBar(QWidget * parent, qt::DrawWidget * drawWidget, pl
  {
    QToolBar * toolBar = new QToolBar(parent);
    toolBar->setIconSize(QSize(20, 20));
 +  toolBar->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
++  // Korea SOS Atlas Kit: framed buttons so it is clear what can be clicked.
++  toolBar->setStyleSheet(
++      "QToolBar { spacing: 6px; }"
++      "QToolButton { border: 1px solid palette(mid); border-radius: 6px; padding: 4px 10px;"
++      " background: palette(button); }"
++      "QToolButton:hover { border-color: palette(highlight); background: palette(light); }"
++      "QToolButton:pressed { background: palette(midlight); }");
  
    m2::PointD const mercator = info.GetMercator();
  
@@ -1050,7 +1133,8 @@ index fb1523e184..040e461026 100644
 -  stopAction->setToolTip("Add Stop");
 +  QAction * stopAction = toolBar->addAction(QIcon(":/navig64/point-intermediate.png"), QObject::tr("Via"));
 +  stopAction->setToolTip(QObject::tr("Via"));
-+  stopAction->setEnabled(drawWidget->GetFramework().GetRoutingManager().GetRoutePoints().size() >= 2);
++  // Korea SOS Atlas Kit: a greyed-out button looked clickable; show it only when it works.
++  stopAction->setVisible(drawWidget->GetFramework().GetRoutingManager().GetRoutePoints().size() >= 2);
    QObject::connect(stopAction, &QAction::triggered, parent,
                     [drawWidget, mercator] { drawWidget->RoutePointFromPlace(RouteMarkType::Intermediate, mercator); });
  
@@ -1061,7 +1145,7 @@ index fb1523e184..040e461026 100644
    QObject::connect(toAction, &QAction::triggered, parent,
                     [drawWidget, mercator] { drawWidget->RoutePointFromPlace(RouteMarkType::Finish, mercator); });
  
-@@ -76,11 +82,33 @@ QToolBar * createActionToolBar(QWidget * parent, qt::DrawWidget * drawWidget, pl
+@@ -76,11 +90,33 @@ QToolBar * createActionToolBar(QWidget * parent, qt::DrawWidget * drawWidget, pl
    if (info.ShouldShowEditPlace())
    {
      FeatureID const featureId = info.GetID();
