@@ -19,7 +19,7 @@ fn file_hash(path: &Path) -> io::Result<String> {
 }
 static RUNNING: AtomicBool = AtomicBool::new(false);
 
-pub(super) fn destination(root: &Path, location: Option<&shelters::Location>) -> String {
+pub(super) fn destination(root: &Path, location: Option<&shelters::Location>, docs: &[Doc]) -> String {
     let Some(location) = location else {
         return "No verified coordinates for this record".into();
     };
@@ -42,7 +42,7 @@ pub(super) fn destination(root: &Path, location: Option<&shelters::Location>) ->
     if RUNNING.load(Ordering::SeqCst) {
         "Destination sent to Organic Maps · Select a start on the map".into()
     } else {
-        launch(root)
+        launch(root, docs)
     }
 }
 
@@ -353,9 +353,18 @@ pub(super) fn reset_software_gl(root: &Path) -> String {
     }
 }
 
-pub(super) fn launch(root: &Path) -> String {
+/// The viewer's saved-places folder (Organic Maps: SettingsDir()/bookmarks).
+fn bookmarks_dir(root: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let state = state_dir(root)?;
+    Ok(if cfg!(windows) { state.join("settings").join("bookmarks") } else { state.join("config").join("OMaps").join("bookmarks") })
+}
+pub(super) fn launch(root: &Path, docs: &[Doc]) -> String {
     if RUNNING.swap(true, Ordering::SeqCst) {
         return "Organic Maps is already open".into();
+    }
+    // Shelters and water points appear on the map as saved places (one list per province).
+    if let Ok(dir) = bookmarks_dir(root) {
+        let _ = crate::map_places::write(&dir, docs);
     }
     let marker = state_dir(root).ok().map(|d| d.join(SOFTWARE_GL_MARKER));
     let can_fall_back = cfg!(windows) && marker.is_some();

@@ -14,6 +14,95 @@ pub(super) fn near(query: &str) -> Option<(f64, f64)> {
         None
     }
 }
+/// Where "nearest" is measured from: `@lat,lon`, or `@place` resolved offline from the
+/// facility records themselves (a facility name containing the text, otherwise addresses
+/// containing it; the median of their coordinates). No geocoder, no network.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct Origin {
+    pub lat: f64,
+    pub lon: f64,
+    pub label: String,
+}
+thread_local! {
+    static ORIGIN_CACHE: std::cell::RefCell<Option<(String, usize, Option<Origin>)>> = const { std::cell::RefCell::new(None) };
+}
+/// `@place words` (the whole query after `@`, unless it is `@lat,lon`).
+pub(super) fn place_query(query: &str) -> Option<&str> {
+    let q = query.trim();
+    let place = q.strip_prefix('@')?.trim();
+    (near(q).is_none() && place.chars().filter(|c| !c.is_whitespace()).count() >= 2).then_some(place)
+}
+pub(super) fn origin(docs: &[Doc], query: &str) -> Option<Origin> {
+    if let Some((lat, lon)) = near(query) {
+        return Some(Origin { lat, lon, label: format!("좌표 {lat:.4}, {lon:.4}") });
+    }
+    let place = place_query(query)?;
+    if let Some(hit) = ORIGIN_CACHE.with(|c| {
+        c.borrow().as_ref().filter(|(k, n, _)| k == place && *n == docs.len()).map(|(_, _, o)| o.clone())
+    }) {
+        return hit;
+    }
+    let found = resolve_place(docs, place);
+    ORIGIN_CACHE.with(|c| *c.borrow_mut() = Some((place.to_owned(), docs.len(), found.clone())));
+    found
+}
+/// Facility titles are "[kind] name · address".
+fn name_and_address(title: &str) -> (&str, &str) {
+    let rest = title.split_once("] ").map_or(title, |(_, r)| r);
+    rest.split_once(" · ").unwrap_or((rest, ""))
+}
+/// "서울특별시 중구 태평로1가 31" -> "서울특별시 중구"
+fn district(address: &str) -> String {
+    address.split_whitespace().take(2).collect::<Vec<_>>().join(" ")
+}
+fn resolve_place(docs: &[Doc], place: &str) -> Option<Origin> {
+    let words: Vec<String> = place.split_whitespace().map(|w| w.case_fold().collect()).collect();
+    let mut by_name = Vec::new();
+    let mut by_address = Vec::new();
+    for d in docs.iter().filter(|d| d.id.starts_with("shelter:")) {
+        let Some(p) = d.location.as_ref().filter(|p| p.valid()) else { continue };
+        let (name, address) = name_and_address(&d.title);
+        let n = name.case_fold().collect::<String>();
+        let full = format!("{n} {}", address.case_fold().collect::<String>());
+        if !words.iter().all(|w| full.contains(w.as_str())) {
+            continue;
+        }
+        let hit = (p.lat, p.lon, name.to_owned(), district(address));
+        if words.iter().any(|w| n.contains(w.as_str())) { by_name.push(hit) } else { by_address.push(hit) }
+    }
+    let (hits, kind) = if !by_name.is_empty() { (by_name, "이름") } else { (by_address, "주소") };
+    if hits.is_empty() {
+        return None;
+    }
+    // The same street or place name exists in several cities: use the district with the
+    // most matches, never a midpoint between cities.
+    let mut counts: Vec<(String, usize)> = Vec::new();
+    for h in &hits {
+        match counts.iter_mut().find(|(d, _)| *d == h.3) {
+            Some(c) => c.1 += 1,
+            None => counts.push((h.3.clone(), 1)),
+        }
+    }
+    counts.sort_by(|a, b| b.1.cmp(&a.1));
+    let main = counts[0].0.clone();
+    let cluster: Vec<_> = hits.iter().filter(|h| h.3 == main).collect();
+    let median = |mut v: Vec<f64>| {
+        v.sort_by(f64::total_cmp);
+        v[v.len() / 2]
+    };
+    let lat = median(cluster.iter().map(|h| h.0).collect());
+    let lon = median(cluster.iter().map(|h| h.1).collect());
+    let mut label = if cluster.len() == 1 && kind == "이름" {
+        format!("'{place}' → {} ({main})", cluster[0].2)
+    } else {
+        format!("'{place}'이(가) {kind}에 있는 {main} 시설 {}곳의 중앙 (대략)", cluster.len())
+    };
+    if counts.len() > 1 {
+        let others: Vec<String> = counts[1..].iter().take(2).map(|(d, n)| format!("{d} {n}")).collect();
+        label.push_str(&format!(" · 다른 지역: {} → 예: @{} {place}", others.join(", "), counts[1].0.split_whitespace().last().unwrap_or("")));
+    }
+    Some(Origin { lat, lon, label })
+}
 pub(super) fn distance(origin: (f64, f64), p: &Location) -> f64 {
     let dlat = (p.lat - origin.0).to_radians();
     let dlon = (p.lon - origin.1).to_radians();
@@ -184,7 +273,7 @@ mod tests {
         assert!(checked(&root, "shelters.json", &Value::String("wrong hash".into())).is_err());
         assert!(checked(&root, "../docs", &Value::Null).is_err());
         assert_eq!(
-            maps::destination(&root, None),
+            maps::destination(&root, None, &[]),
             "No verified coordinates for this record"
         );
     }

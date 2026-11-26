@@ -42,6 +42,7 @@ mod facility_view;
 mod grounding;
 mod layout;
 mod library;
+mod map_places;
 mod maps;
 mod medical_facilities;
 mod search_processing;
@@ -227,11 +228,13 @@ fn load(root: &Path) -> Result<(Vec<Doc>, PathBuf), Box<dyn std::error::Error>> 
     Ok((docs, pdf))
 }
 fn search(docs: &[Doc], query: &str, cat: &str) -> Vec<usize> {
-    let near = shelters::near(query);
+    let near = shelters::origin(docs, query).map(|o| (o.lat, o.lon));
     let q = query.case_fold().collect::<String>();
+    // `@place words` names the origin; it is not a text filter.
+    let place = shelters::place_query(query).is_some() && near.is_some();
     let words = q
         .split_whitespace()
-        .filter(|s| near.is_none() || !s.starts_with('@'))
+        .filter(|s| !place && (near.is_none() || !s.starts_with('@')))
         .collect::<Vec<_>>();
     let mut result: Vec<_> = docs
         .iter()
@@ -1255,12 +1258,16 @@ fn draw(f: &mut Frame, a: &mut App, docs: &[Doc], rows: &[usize], ai: &Ai, bench
         w - edge - 3,
         style(Some(51)),
     );
+    let origin_note: String;
     put(
         f,
         5,
         edge + 2,
         if CATS[a.cat] == "대피시설" {
-            "Facility names / addresses"
+            origin_note = shelters::origin(docs, &a.query)
+                .map(|o| format!("기준 위치: {}", o.label))
+                .unwrap_or_else(|| "Facility names / addresses · @동네·주소 또는 @위도,경도 → 가까운 순".into());
+            &origin_note
         } else if CATS[a.cat] == "지도" {
             if str_width(maps::MAP_ATTRIBUTION) <= w - edge - 4 {
                 maps::MAP_ATTRIBUTION
@@ -1306,7 +1313,7 @@ fn draw(f: &mut Frame, a: &mut App, docs: &[Doc], rows: &[usize], ai: &Ai, bench
             f,
             6 + i as u16,
             edge + 2,
-            &match (shelters::near(&a.query), docs[*index].location.as_ref()) {
+            &match (shelters::origin(docs, &a.query).map(|o| (o.lat, o.lon)), docs[*index].location.as_ref()) {
                 (Some(origin), Some(p)) => format!(
                     "{:.2}km 직선 · {}",
                     shelters::distance(origin, p),
@@ -2140,10 +2147,10 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
                             a.notice = open_folder(&licenses_dir(pdf))
                         }
                         KeyCode::Char('c') => copy_current(&mut a, docs, &ai_raw),
-                        KeyCode::Char('4') => a.notice = maps::launch(pdf),
+                        KeyCode::Char('4') => a.notice = maps::launch(pdf, &docs),
                         KeyCode::Char('m') => {
                             if let Some(i) = a.opened {
-                                a.notice = maps::destination(pdf, docs[i].location.as_ref());
+                                a.notice = maps::destination(pdf, docs[i].location.as_ref(), &docs);
                             }
                         }
                         KeyCode::Char('/') if a.view < 2 => {
@@ -2243,7 +2250,7 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
                                     a.ai_editing = true;
                                     a.editing = false;
                                 }
-                                0 if n == 3 => a.notice = maps::launch(pdf),
+                                0 if n == 3 => a.notice = maps::launch(pdf, &docs),
                                 0 => {
                                     a.view = if n == 1 {
                                         if a.view == 1 {
@@ -2287,7 +2294,7 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
                                 7 => {
                                     if let Some(i) = a.opened {
                                         a.notice =
-                                            maps::destination(pdf, docs[i].location.as_ref());
+                                            maps::destination(pdf, docs[i].location.as_ref(), &docs);
                                     }
                                 }
                                 _ => {}
