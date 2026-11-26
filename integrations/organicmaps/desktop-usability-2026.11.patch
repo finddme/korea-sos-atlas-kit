@@ -1,5 +1,5 @@
 diff --git a/libs/drape_frontend/selection_shape_generator.cpp b/libs/drape_frontend/selection_shape_generator.cpp
-index 800acada81..9b01e870fc 100644
+index 800acada81..f33ef8d245 100644
 --- a/libs/drape_frontend/selection_shape_generator.cpp
 +++ b/libs/drape_frontend/selection_shape_generator.cpp
 @@ -112,7 +112,9 @@ void GenerateJoinsTriangles(glsl::vec3 const & pivot, std::vector<glsl::vec2> co
@@ -7,12 +7,193 @@ index 800acada81..9b01e870fc 100644
  dp::Color SelectionShapeGenerator::GetSelectionColor()
  {
 -  return df::GetColorConstant("Selection");
-+  // Korea SOS Atlas Kit modification, 2026-11-26: magenta instead of the style's blue, so the
-+  // chosen place stands out from the blue search-result pins and water-point markers.
-+  return dp::Color(0xE6, 0x00, 0x7E, df::GetColorConstant("Selection").GetAlpha());
++  // Korea SOS Atlas Kit modification, 2026-11-26: soft yellow instead of the style's blue, so the
++  // chosen place stands out from the blue search-result pins and water points and the red shelters.
++  return dp::Color(0xFF, 0xB3, 0x00, 0xB0);
  }
  
  // static
+@@ -120,18 +122,24 @@ drape_ptr<RenderNode> SelectionShapeGenerator::GenerateSelectionMarker(ref_ptr<d
+                                                                        ref_ptr<dp::TextureManager> mng)
+ {
+   size_t constexpr kTriangleCount = 40;
+-  size_t constexpr kVertexCount = 3 * kTriangleCount;
++  // Korea SOS Atlas Kit: a violet ring (radius 1..kRingOuter) around the fill.
++  size_t constexpr kVertexCount = 3 * kTriangleCount * 3;
++  float constexpr kRingOuter = 1.25f;
+   auto const etalonSector = static_cast<float>(2.0 * math::pi / kTriangleCount);
+ 
+   dp::TextureManager::ColorRegion color;
+   mng->GetColorRegion(GetSelectionColor(), color);
+   auto const colorCoord = glsl::ToVec2(color.GetTexRect().Center());
++  dp::TextureManager::ColorRegion ring;
++  mng->GetColorRegion(dp::Color(0x7C, 0x4D, 0xFF, 0xFF), ring);
++  bool const hasRing = ring.GetTexture() == color.GetTexture();  // one draw call needs one texture
++  auto const ringCoord = glsl::ToVec2(ring.GetTexRect().Center());
+ 
+-  buffer_vector<MarkerVertex, kTriangleCount> buffer;
++  buffer_vector<MarkerVertex, kVertexCount> buffer;
+ 
+   glsl::vec2 const startNormal(0.0f, 1.0f);
+ 
+-  for (size_t i = 0; i < kTriangleCount + 1; ++i)
++  for (size_t i = 0; i < kTriangleCount; ++i)
+   {
+     auto const normal = glsl::rotate(startNormal, i * etalonSector);
+     auto const nextNormal = glsl::rotate(startNormal, (i + 1) * etalonSector);
+@@ -139,6 +147,16 @@ drape_ptr<RenderNode> SelectionShapeGenerator::GenerateSelectionMarker(ref_ptr<d
+     buffer.emplace_back(glsl::vec2(0.0f, 0.0f), colorCoord);
+     buffer.emplace_back(normal, colorCoord);
+     buffer.emplace_back(nextNormal, colorCoord);
++
++    if (!hasRing)
++      continue;
++    // The ring is an annulus, not a disc under the fill, so the translucent fill stays clean.
++    buffer.emplace_back(normal, ringCoord);
++    buffer.emplace_back(normal * kRingOuter, ringCoord);
++    buffer.emplace_back(nextNormal * kRingOuter, ringCoord);
++    buffer.emplace_back(normal, ringCoord);
++    buffer.emplace_back(nextNormal * kRingOuter, ringCoord);
++    buffer.emplace_back(nextNormal, ringCoord);
+   }
+ 
+   auto state = CreateRenderState(gpu::Program::Accuracy, DepthLayer::OverlayLayer);
+@@ -147,7 +165,7 @@ drape_ptr<RenderNode> SelectionShapeGenerator::GenerateSelectionMarker(ref_ptr<d
+ 
+   drape_ptr<RenderNode> renderNode;
+   {
+-    dp::Batcher batcher(kTriangleCount * dp::Batcher::IndexPerTriangle, kVertexCount);
++    dp::Batcher batcher(kVertexCount, kVertexCount);
+     batcher.SetBatcherHash(static_cast<uint64_t>(BatcherBucket::Default));
+     dp::SessionGuard guard(context, batcher,
+                            [&renderNode](dp::RenderState const & state, drape_ptr<dp::RenderBucket> && b)
+@@ -157,7 +175,7 @@ drape_ptr<RenderNode> SelectionShapeGenerator::GenerateSelectionMarker(ref_ptr<d
+       renderNode = make_unique_dp<RenderNode>(state, bucket->MoveBuffer());
+     });
+ 
+-    dp::AttributeProvider provider(1 /* stream count */, kVertexCount);
++    dp::AttributeProvider provider(1 /* stream count */, static_cast<uint32_t>(buffer.size()));
+     provider.InitStream(0 /* stream index */, GetMarkerBindingInfo(), make_ref(buffer.data()));
+ 
+     batcher.InsertTriangleList(context, state, make_ref(&provider), nullptr);
+diff --git a/libs/map/framework.cpp b/libs/map/framework.cpp
+index 5b7e39784d..c423b5d1be 100644
+--- a/libs/map/framework.cpp
++++ b/libs/map/framework.cpp
+@@ -1810,6 +1810,7 @@ void Framework::FillSearchResultsMarks(SearchResultsIterT beg, SearchResultsIter
+       mark->SetFoundFeature(fID);
+       mark->SetFromType(r.GetFeatureType());
+       mark->SetVisited(m_searchMarks.IsVisited(fID));
++      mark->SetSelected(m_searchMarks.IsSelected(fID));
+     }
+   }
+ }
+@@ -2421,6 +2422,7 @@ void Framework::ActivateMapSelection()
+   }
+ 
+   auto const & featureId = m_currentPlacePageInfo->GetID();
++  m_searchMarks.SetSelected(featureId);  // Korea SOS Atlas Kit: hide the selected place's search pin
+ 
+   auto const selObj = m_currentPlacePageInfo->GetSelectedObject();
+   CHECK_NOT_EQUAL(selObj, df::SelectionShape::OBJECT_EMPTY, ("Empty selections are impossible."));
+@@ -2469,6 +2471,7 @@ bool Framework::DeactivateMapSelection()
+     HideRouteTransitIfNeeded();
+ 
+     DeactivateHotelSearchMark();
++    m_searchMarks.SetSelected({});  // Korea SOS Atlas Kit: show its search pin again
+ 
+     auto & bm = GetBookmarkManager();
+     bm.OnTrackDeselected();
+diff --git a/libs/map/search_mark.cpp b/libs/map/search_mark.cpp
+index 51d4b64479..8c18950113 100644
+--- a/libs/map/search_mark.cpp
++++ b/libs/map/search_mark.cpp
+@@ -360,6 +360,7 @@ SearchMarkPoint::SearchMarkPoint(m2::PointD const & ptOrg)
+   : UserMark(ptOrg, UserMark::Type::SEARCH)
+   , m_type(SearchMarkType::Default)
+   , m_isVisited(false)
++  , m_isSelected(false)
+ {}
+ 
+ m2::PointD SearchMarkPoint::GetPixelOffset() const
+@@ -437,6 +438,14 @@ void SearchMarkPoint::SetVisited(bool isVisited)
+   SetDirty();
+ }
+ 
++void SearchMarkPoint::SetSelected(bool isSelected)
++{
++  if (m_isSelected == isSelected)
++    return;
++  m_isSelected = isSelected;
++  SetDirty();
++}
++
+ std::string const * SearchMarkPoint::GetSymbolName() const
+ {
+   std::string const * symbolName = nullptr;
+@@ -523,6 +532,21 @@ void SearchMarks::OnDeactivate(FeatureID const & featureId)
+   }
+ }
+ 
++void SearchMarks::SetSelected(FeatureID const & id)
++{
++  ASSERT(m_bmManager, ());
++  if (id == m_selected)
++    return;
++  m_selected = id;
++  auto session = m_bmManager->GetEditSession();
++  for (auto const markId : m_bmManager->GetUserMarkIds(UserMark::Type::SEARCH))
++  {
++    bool const selected = IsSelected(m_bmManager->GetMark<SearchMarkPoint>(markId)->GetFeatureID());
++    if (m_bmManager->GetMark<SearchMarkPoint>(markId)->IsVisible() == selected)
++      session.GetMarkForEdit<SearchMarkPoint>(markId)->SetSelected(selected);
++  }
++}
++
+ bool SearchMarks::IsVisited(FeatureID const & id) const
+ {
+   return m_visitedSearchMarks.find(id) != m_visitedSearchMarks.cend();
+diff --git a/libs/map/search_mark.hpp b/libs/map/search_mark.hpp
+index c322095397..d61f2042d0 100644
+--- a/libs/map/search_mark.hpp
++++ b/libs/map/search_mark.hpp
+@@ -45,6 +45,11 @@ public:
+   void SetNotFoundType();
+ 
+   void SetVisited(bool isVisited);
++  // Korea SOS Atlas Kit modification, 2026-11-26: the mark of the selected place is hidden while
++  // it is selected; the selection circle marks that place (the pin is drawn 6 px lower and at the
++  // search centre, so both together looked misaligned).
++  void SetSelected(bool isSelected);
++  bool IsVisible() const override { return !m_isSelected; }
+ 
+ protected:
+   template <typename T, typename U>
+@@ -66,6 +71,7 @@ protected:
+   SearchMarkType m_type;
+ 
+   bool m_isVisited : 1;
++  bool m_isSelected : 1;
+ };
+ 
+ class SearchMarks
+@@ -83,6 +89,10 @@ public:
+ 
+   bool IsVisited(FeatureID const & id) const;
+ 
++  // Hides the mark of |id| (an invalid id shows all marks again).
++  void SetSelected(FeatureID const & id);
++  bool IsSelected(FeatureID const & id) const { return id.IsValid() && id == m_selected; }
++
+   static bool HaveSizes() { return !s_markSizes.empty(); }
+   static std::optional<m2::PointD> GetSize(std::string const & symbolName);
+ 
+@@ -97,4 +107,5 @@ private:
+   m2::PointD m_maxDimension{0, 0};
+ 
+   std::set<FeatureID> m_visitedSearchMarks;
++  FeatureID m_selected;
+ };
 diff --git a/libs/platform/atlas_offline.hpp b/libs/platform/atlas_offline.hpp
 new file mode 100644
 index 0000000000..b58925669d
