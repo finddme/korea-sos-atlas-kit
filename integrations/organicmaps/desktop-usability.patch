@@ -1,8 +1,8 @@
 diff --git a/qt/CMakeLists.txt b/qt/CMakeLists.txt
-index 8bb67b99c2..2019be9078 100644
+index 8bb67b99c2..33562868fd 100644
 --- a/qt/CMakeLists.txt
 +++ b/qt/CMakeLists.txt
-@@ -1,8 +1,11 @@
+@@ -1,8 +1,13 @@
 +# Modified by Korea SOS Atlas Kit, 2026-11-14. Original Apache-2.0 license retained.
  project(desktop)
  
@@ -10,12 +10,14 @@ index 8bb67b99c2..2019be9078 100644
  
  set(SRC
 +  atlas_navigation.cpp
++  atlas_nearby.cpp
++  atlas_nearby.hpp
 +  atlas_ui.hpp
    about.cpp
    about.hpp
    bookmark_dialog.cpp
 diff --git a/qt/about.cpp b/qt/about.cpp
-index 9cba4a4ae8..c40cd87a2d 100644
+index 9cba4a4ae8..f554490ac4 100644
 --- a/qt/about.cpp
 +++ b/qt/about.cpp
 @@ -1,3 +1,4 @@
@@ -36,10 +38,10 @@ index 9cba4a4ae8..c40cd87a2d 100644
  
 diff --git a/qt/atlas_ko.json b/qt/atlas_ko.json
 new file mode 100644
-index 0000000000..0a5c88e878
+index 0000000000..74338aba6c
 --- /dev/null
 +++ b/qt/atlas_ko.json
-@@ -0,0 +1,109 @@
+@@ -0,0 +1,122 @@
 +{
 +  "Route and location": "경로 · 현재 위치",
 +  "GPS: no position received": "GPS 위치 미수신 · 수동 출발지 선택 가능",
@@ -147,11 +149,24 @@ index 0000000000..0a5c88e878
 +  "Scale +": "확대",
 +  "Scale -": "축소",
 +  "Download Maps": "지도 내려받기",
-+  "Select an icon; right-click any other point on the map.": "지도 아이콘을 클릭하세요. 빈 곳은 마우스 오른쪽 버튼으로 선택합니다."
++  "Select an icon; right-click any other point on the map.": "지도 아이콘을 클릭하세요. 빈 곳은 마우스 오른쪽 버튼으로 선택합니다.",
++  "Nearby shelters": "가까운 대피시설",
++  "All facilities": "대피소·급수시설 모두",
++  "Civil defence shelters": "민방위 대피소만",
++  "Emergency water": "비상급수시설만",
++  "Set as destination": "도착지로 정하기",
++  "Click to show it on the map; double-click to set it as the destination.": "클릭하면 지도에서 보여 주고, 두 번 클릭하면 도착지로 정합니다.",
++  "Public data. Whether a place is open or has water is not confirmed; follow official guidance first.": "공공데이터 기준입니다. 현재 개방·급수 가능 여부는 확인되지 않으니 공식 안내를 먼저 따르세요.",
++  "Loading saved places...": "저장한 장소를 불러오는 중...",
++  "No facility lists. Open the map from Korea SOS Atlas to add them.": "대피시설 목록이 없습니다. Korea SOS Atlas에서 지도를 열면 추가됩니다.",
++  "Distance from: route start": "거리 기준: 출발지",
++  "Distance from: route start (%1)": "거리 기준: 출발지 (%1)",
++  "Distance from: current position (GPS)": "거리 기준: 현재 위치 (GPS)",
++  "Distance from: map centre. Move the map to search another area.": "거리 기준: 지도 중심. 지도를 옮기면 그 주변으로 다시 찾습니다."
 +}
 diff --git a/qt/atlas_location.hpp b/qt/atlas_location.hpp
 new file mode 100644
-index 0000000000..bbdc48b3b1
+index 0000000000..5019bcdf84
 --- /dev/null
 +++ b/qt/atlas_location.hpp
 @@ -0,0 +1,13 @@
@@ -170,7 +185,7 @@ index 0000000000..bbdc48b3b1
 +}  // namespace qt
 diff --git a/qt/atlas_location_tests.cpp b/qt/atlas_location_tests.cpp
 new file mode 100644
-index 0000000000..ee07ac3738
+index 0000000000..ab08120804
 --- /dev/null
 +++ b/qt/atlas_location_tests.cpp
 @@ -0,0 +1,10 @@
@@ -186,13 +201,14 @@ index 0000000000..ee07ac3738
 +int main() {}
 diff --git a/qt/atlas_navigation.cpp b/qt/atlas_navigation.cpp
 new file mode 100644
-index 0000000000..afde4931cc
+index 0000000000..6cafa14576
 --- /dev/null
 +++ b/qt/atlas_navigation.cpp
-@@ -0,0 +1,209 @@
+@@ -0,0 +1,215 @@
 +// Korea SOS Atlas Kit modification, 2026-11-14. Apache-2.0; upstream notices retained.
 +#include "qt/mainwindow.hpp"
 +#include "qt/atlas_location.hpp"
++#include "qt/atlas_nearby.hpp"
 +#include "qt/draw_widget.hpp"
 +#include "map/framework.hpp"
 +#include "geometry/mercator.hpp"
@@ -304,6 +320,11 @@ index 0000000000..afde4931cc
 +  dock->setWidget(panel);
 +  dock->setMinimumWidth(290);
 +  addDockWidget(Qt::LeftDockWidgetArea, dock);
++  auto * nearby = CreateAtlasNearby(this, GetFramework());
++  addDockWidget(Qt::RightDockWidgetArea, nearby);
++  tabifyDockWidget(m_Docks[kSearchDock], nearby);
++  nearby->show();
++  nearby->raise();
 +  auto * timer = new QTimer(this);
 +  connect(timer, &QTimer::timeout, this, &MainWindow::UpdateAtlasNavigation);
 +  timer->start(1000);
@@ -399,9 +420,316 @@ index 0000000000..afde4931cc
 +  else if (m_atlasSteps->count() == 0) m_atlasSteps->addItems(steps);
 +}
 +} // namespace qt
+diff --git a/qt/atlas_nearby.cpp b/qt/atlas_nearby.cpp
+new file mode 100644
+index 0000000000..a2fcbdba02
+--- /dev/null
++++ b/qt/atlas_nearby.cpp
+@@ -0,0 +1,282 @@
++// Korea SOS Atlas Kit modification, 2026-11-26. Apache-2.0; upstream notices retained.
++#include "qt/atlas_nearby.hpp"
++
++#include "map/bookmark.hpp"
++#include "map/bookmark_manager.hpp"
++#include "map/framework.hpp"
++#include "map/routing_mark.hpp"
++
++#include "geometry/distance_on_sphere.hpp"
++#include "geometry/mercator.hpp"
++
++#include <QtCore/QElapsedTimer>
++#include <QtCore/QTimer>
++#include <QtWidgets/QComboBox>
++#include <QtWidgets/QDockWidget>
++#include <QtWidgets/QLabel>
++#include <QtWidgets/QListWidget>
++#include <QtWidgets/QPushButton>
++#include <QtWidgets/QVBoxLayout>
++
++#include <algorithm>
++#include <limits>
++#include <optional>
++#include <string>
++#include <vector>
++
++namespace qt
++{
++namespace
++{
++// Document name written by the kit (src/map_places.rs): "대피시설 · <province>".
++constexpr char kListPrefix[] = "대피시설 · ";
++constexpr size_t kShown = 30;
++// The list follows an origin once it has moved this far.
++constexpr double kResortMeters = 30;
++
++enum Kind { kAll = 0, kShelter, kWater };
++
++struct Place
++{
++  kml::MarkId m_id;
++  m2::PointD m_pivot;
++  QString m_name;
++  QString m_address;
++  bool m_water;
++};
++
++QString Distance(double meters)
++{
++  if (meters < 1000)
++    return QString("%1 m").arg(static_cast<int>(meters + 0.5));
++  return QString("%1 km").arg(meters / 1000, 0, 'f', meters < 10000 ? 2 : 1);
++}
++
++class NearbyPanel final : public QWidget
++{
++public:
++  NearbyPanel(QWidget * parent, Framework & framework) : QWidget(parent), m_framework(framework)
++  {
++    auto * layout = new QVBoxLayout(this);
++    m_kind = new QComboBox(this);
++    m_kind->setObjectName("atlasNearbyKind");
++    m_kind->addItem(tr("All facilities"), kAll);
++    m_kind->addItem(tr("Civil defence shelters"), kShelter);
++    m_kind->addItem(tr("Emergency water"), kWater);
++    connect(m_kind, &QComboBox::currentIndexChanged, this, [this](int) { m_dirty = true; Tick(); });
++    m_origin = new QLabel(this);
++    m_origin->setWordWrap(true);
++    m_list = new QListWidget(this);
++    m_list->setObjectName("atlasNearbyList");
++    m_list->setWordWrap(true);
++    m_list->setAlternatingRowColors(true);
++    connect(m_list, &QListWidget::itemClicked, this, [this](QListWidgetItem * item) { Show(item); });
++    connect(m_list, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem * item) { SetDestination(item); });
++    m_destination = new QPushButton(tr("Set as destination"), this);
++    m_destination->setObjectName("atlasNearbyDestination");
++    m_destination->setEnabled(false);
++    connect(m_list, &QListWidget::currentItemChanged, this,
++            [this](QListWidgetItem * item, QListWidgetItem *) { m_destination->setEnabled(item != nullptr); });
++    connect(m_destination, &QPushButton::clicked, this, [this] { SetDestination(m_list->currentItem()); });
++    auto * help = new QLabel(tr("Click to show it on the map; double-click to set it as the destination."), this);
++    help->setWordWrap(true);
++    auto * notice = new QLabel(tr("Public data. Whether a place is open or has water is not confirmed; "
++                                  "follow official guidance first."), this);
++    notice->setWordWrap(true);
++    layout->addWidget(m_kind);
++    layout->addWidget(m_origin);
++    layout->addWidget(m_list, 1);
++    layout->addWidget(m_destination);
++    layout->addWidget(help);
++    layout->addWidget(notice);
++
++    auto * timer = new QTimer(this);
++    connect(timer, &QTimer::timeout, this, [this] { Tick(); });
++    timer->start(700);
++    Tick();
++  }
++
++private:
++  void Load()
++  {
++    auto const & bm = m_framework.GetBookmarkManager();
++    m_places.clear();
++    for (auto const groupId : bm.GetUnsortedBmGroupsIdList())
++    {
++      if (!bm.GetCategoryName(groupId).starts_with(kListPrefix))
++        continue;
++      for (auto const markId : bm.GetUserMarkIds(groupId))
++      {
++        auto const * mark = bm.GetBookmark(markId);
++        if (!mark)
++          continue;
++        auto const name = QString::fromStdString(mark->GetPreferredName());
++        m_places.push_back({markId, mark->GetPivot(), name, QString::fromStdString(mark->GetDescription()),
++                            name.startsWith(QString::fromUtf8("[비상급수]"))});
++      }
++    }
++    m_dirty = true;
++  }
++
++  void Tick()
++  {
++    if (!isVisible())
++      return;
++    auto const & bm = m_framework.GetBookmarkManager();
++    if (bm.IsAsyncLoadingInProgress())
++    {
++      m_origin->setText(tr("Loading saved places..."));
++      return;
++    }
++    if (bm.GetBmGroupsCount() != m_groups)
++    {
++      m_groups = bm.GetBmGroupsCount();
++      Load();
++    }
++    if (m_places.empty())
++    {
++      m_list->clear();
++      m_origin->setText(tr("No facility lists. Open the map from Korea SOS Atlas to add them."));
++      return;
++    }
++
++    // Origin: the chosen route start, else the device position, else the map centre.
++    std::optional<m2::PointD> origin;
++    QString label;
++    for (auto const & p : m_framework.GetRoutingManager().GetRoutePoints())
++    {
++      if (p.m_pointType != RouteMarkType::Start)
++        continue;
++      origin = p.m_position;
++      label = p.m_isMyPosition || p.m_title.empty() ? tr("Distance from: route start")
++                                                    : tr("Distance from: route start (%1)")
++                                                          .arg(QString::fromStdString(p.m_title));
++    }
++    if (!origin)
++    {
++      if (auto const position = m_framework.GetCurrentPosition())
++      {
++        origin = *position;
++        label = tr("Distance from: current position (GPS)");
++      }
++    }
++    if (!origin)
++    {
++      auto const center = m_framework.GetViewportCenter();
++      bool const settled = center == m_lastCenter;
++      m_lastCenter = center;
++      // Wait until the map stops moving, and keep the list when the map only moved to
++      // the place picked from it.
++      if (!settled)
++        return;
++      if (m_pickTimer.isValid())
++      {
++        // A place picked from the list moved the map (and the place page may shift it).
++        // Keep the list until the user moves the map away from where that move ended.
++        if (m_pickTimer.elapsed() < 2500)
++          return;
++        m_pickTimer.invalidate();
++        m_heldCenter = center;
++      }
++      if (m_heldCenter && mercator::DistanceOnEarth(center, *m_heldCenter) < kResortMeters)
++        return;
++      m_heldCenter.reset();
++      origin = center;
++      label = tr("Distance from: map centre. Move the map to search another area.");
++    }
++    if (!m_dirty && label == m_label && m_sortedAt && mercator::DistanceOnEarth(*origin, *m_sortedAt) < kResortMeters)
++      return;
++    m_dirty = false;
++    m_label = label;
++    m_sortedAt = origin;
++    m_origin->setText(label);
++    Sort(*origin);
++  }
++
++  void Sort(m2::PointD const & origin)
++  {
++    auto const kind = m_kind->currentData().toInt();
++    auto const from = mercator::ToLatLon(origin);
++    std::vector<std::pair<double, Place const *>> found;
++    found.reserve(m_places.size());
++    for (auto const & p : m_places)
++    {
++      if ((kind == kShelter && p.m_water) || (kind == kWater && !p.m_water))
++        continue;
++      found.emplace_back(ms::DistanceOnEarth(from, mercator::ToLatLon(p.m_pivot)), &p);
++    }
++    auto const n = std::min(found.size(), kShown);
++    std::partial_sort(found.begin(), found.begin() + n, found.end(),
++                      [](auto const & a, auto const & b) { return a.first < b.first; });
++
++    auto const selected = m_list->currentItem() ? m_list->currentItem()->data(Qt::UserRole) : QVariant();
++    m_list->clear();
++    for (size_t i = 0; i < n; ++i)
++    {
++      auto const & [meters, p] = found[i];
++      auto * item = new QListWidgetItem(QString("%1 · %2\n%3").arg(Distance(meters), p->m_name, p->m_address), m_list);
++      item->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(p->m_id));
++      if (selected.isValid() && selected.toULongLong() == p->m_id)
++        m_list->setCurrentItem(item);
++    }
++  }
++
++  Place const * Find(QListWidgetItem * item) const
++  {
++    if (!item)
++      return nullptr;
++    auto const id = static_cast<kml::MarkId>(item->data(Qt::UserRole).toULongLong());
++    auto const it = std::find_if(m_places.cbegin(), m_places.cend(), [id](Place const & p) { return p.m_id == id; });
++    return it == m_places.cend() ? nullptr : &*it;
++  }
++
++  void Show(QListWidgetItem * item)
++  {
++    auto const * place = Find(item);
++    if (!place || !m_framework.GetBookmarkManager().GetBookmark(place->m_id))
++      return;
++    m_pickTimer.start();
++    m_framework.ShowBookmark(place->m_id);
++  }
++
++  void SetDestination(QListWidgetItem * item)
++  {
++    auto const * place = Find(item);
++    if (!place)
++      return;
++    RouteMarkData target;
++    target.m_pointType = RouteMarkType::Finish;
++    target.m_position = place->m_pivot;
++    target.m_title = place->m_name.toStdString();
++    auto & rm = m_framework.GetRoutingManager();
++    rm.AddRoutePoint(std::move(target), false /* optimize */);
++    if (rm.GetRoutePoints().size() >= 2)
++      rm.BuildRoute();
++  }
++
++  Framework & m_framework;
++  QComboBox * m_kind = nullptr;
++  QLabel * m_origin = nullptr;
++  QListWidget * m_list = nullptr;
++  QPushButton * m_destination = nullptr;
++  std::vector<Place> m_places;
++  size_t m_groups = std::numeric_limits<size_t>::max();
++  bool m_dirty = true;
++  QString m_label;
++  m2::PointD m_lastCenter;
++  std::optional<m2::PointD> m_sortedAt;
++  std::optional<m2::PointD> m_heldCenter;
++  QElapsedTimer m_pickTimer;
++};
++}  // namespace
++
++QDockWidget * CreateAtlasNearby(QWidget * parent, Framework & framework)
++{
++  auto * dock = new QDockWidget(QDockWidget::tr("Nearby shelters"), parent);
++  dock->setObjectName("atlasNearbyDock");
++  dock->setFeatures(QDockWidget::NoDockWidgetFeatures);
++  dock->setWidget(new NearbyPanel(dock, framework));
++  dock->setMinimumWidth(320);
++  return dock;
++}
++}  // namespace qt
+diff --git a/qt/atlas_nearby.hpp b/qt/atlas_nearby.hpp
+new file mode 100644
+index 0000000000..faa41f746c
+--- /dev/null
++++ b/qt/atlas_nearby.hpp
+@@ -0,0 +1,13 @@
++// Korea SOS Atlas Kit modification, 2026-11-26. Apache-2.0; upstream notices retained.
++#pragma once
++
++class Framework;
++class QDockWidget;
++class QWidget;
++
++namespace qt
++{
++// "Nearby shelters" panel: the kit's facility lists (saved places named "대피시설 · …")
++// sorted by distance from the route start, a fresh GPS fix, or the map centre.
++QDockWidget * CreateAtlasNearby(QWidget * parent, Framework & framework);
++}  // namespace qt
 diff --git a/qt/atlas_ui.hpp b/qt/atlas_ui.hpp
 new file mode 100644
-index 0000000000..f19f122a29
+index 0000000000..ceeed90663
 --- /dev/null
 +++ b/qt/atlas_ui.hpp
 @@ -0,0 +1,22 @@
@@ -428,7 +756,7 @@ index 0000000000..f19f122a29
 +  QCoreApplication::installTranslator(&translator);
 +}
 diff --git a/qt/bookmark_dialog.cpp b/qt/bookmark_dialog.cpp
-index c4598bfa42..89076c98cf 100644
+index c4598bfa42..3402e248e8 100644
 --- a/qt/bookmark_dialog.cpp
 +++ b/qt/bookmark_dialog.cpp
 @@ -1,3 +1,4 @@
@@ -455,7 +783,7 @@ index c4598bfa42..89076c98cf 100644
    auto const categoryIt = m_categories.find(item);
    if (categoryIt != m_categories.cend())
 diff --git a/qt/draw_widget.cpp b/qt/draw_widget.cpp
-index 80c37f18bc..fa61ca94ef 100644
+index 80c37f18bc..2530ed060d 100644
 --- a/qt/draw_widget.cpp
 +++ b/qt/draw_widget.cpp
 @@ -1,3 +1,4 @@
@@ -512,7 +840,7 @@ index 80c37f18bc..fa61ca94ef 100644
  
  void DrawWidget::RouteAlongTrack(kml::TrackId trackId)
 diff --git a/qt/mainwindow.cpp b/qt/mainwindow.cpp
-index 7492252594..8c505dfdc4 100644
+index 7492252594..1efa455e8f 100644
 --- a/qt/mainwindow.cpp
 +++ b/qt/mainwindow.cpp
 @@ -1,4 +1,7 @@
@@ -649,7 +977,7 @@ index 7492252594..8c505dfdc4 100644
  
  void MainWindow::HidePlacePage()
 diff --git a/qt/mainwindow.hpp b/qt/mainwindow.hpp
-index 2c259960ad..f74639b974 100644
+index 2c259960ad..3fe93d27a2 100644
 --- a/qt/mainwindow.hpp
 +++ b/qt/mainwindow.hpp
 @@ -1,3 +1,4 @@
@@ -685,7 +1013,7 @@ index 2c259960ad..f74639b974 100644
    void CreatePlacePagePanel();
    void CreateCountryStatusControls();
 diff --git a/qt/place_page_dialog_common.cpp b/qt/place_page_dialog_common.cpp
-index fb1523e184..14d00bc2d1 100644
+index fb1523e184..040e461026 100644
 --- a/qt/place_page_dialog_common.cpp
 +++ b/qt/place_page_dialog_common.cpp
 @@ -1,3 +1,4 @@
@@ -769,7 +1097,7 @@ index fb1523e184..14d00bc2d1 100644
  }
  
 diff --git a/qt/place_page_dialog_user.cpp b/qt/place_page_dialog_user.cpp
-index 10bdc2a729..b70e23a3ec 100644
+index 10bdc2a729..9d663f1866 100644
 --- a/qt/place_page_dialog_user.cpp
 +++ b/qt/place_page_dialog_user.cpp
 @@ -1,3 +1,4 @@
@@ -808,7 +1136,7 @@ index 10bdc2a729..b70e23a3ec 100644
      // Wikipedia fragment
      if (auto const & wikipedia = info.GetMetadata(feature::Metadata::EType::FMD_WIKIPEDIA); !wikipedia.empty())
 diff --git a/qt/res/resources.qrc b/qt/res/resources.qrc
-index fcba6ad092..4e96512f79 100644
+index fcba6ad092..dbadda2637 100644
 --- a/qt/res/resources.qrc
 +++ b/qt/res/resources.qrc
 @@ -1,4 +1,6 @@
@@ -819,7 +1147,7 @@ index fcba6ad092..4e96512f79 100644
          <file>search.png</file>
          <file>up.png</file>
 diff --git a/qt/search_panel.cpp b/qt/search_panel.cpp
-index 65eff2ceb7..de78ab71e0 100644
+index 65eff2ceb7..40db1921e0 100644
 --- a/qt/search_panel.cpp
 +++ b/qt/search_panel.cpp
 @@ -1,3 +1,4 @@
@@ -915,7 +1243,7 @@ index 65eff2ceb7..de78ab71e0 100644
  
      // hide X button
 diff --git a/qt/search_panel.hpp b/qt/search_panel.hpp
-index 6878ce9fa5..00039c1f8d 100644
+index 6878ce9fa5..f2a805f707 100644
 --- a/qt/search_panel.hpp
 +++ b/qt/search_panel.hpp
 @@ -1,3 +1,4 @@
