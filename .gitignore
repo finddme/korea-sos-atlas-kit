@@ -10,6 +10,7 @@
 !/Cargo.toml
 !/Cargo.lock
 !/build.sh
+!/build.rs
 !/src/
 !/integrations/
 !/.github/

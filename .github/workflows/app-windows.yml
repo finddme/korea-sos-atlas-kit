@@ -1,0 +1,117 @@
+# Builds the Korea SOS Atlas Kit app (korea-sos-atlas-kit.exe) for Windows x64
+# from this repository and, once SignPath is set up, has it code signed.
+#
+# The build uses the same toolchain as dev/release.sh: Rust 1.90.0 with the
+# x86_64-pc-windows-gnullvm target and llvm-mingw 20261104 (pinned by
+# SHA-256), static C runtime, and the Windows file properties from build.rs
+# (product name and version, required for signing). Only this .exe is
+# signed; the map viewer, AI engine and other bundled programs come from
+# their own projects and are packaged unsigned.
+#
+# Signing (job "sign") runs only when the repository has the SignPath
+# settings below, for a pushed v* tag or a manual run with "sign" checked.
+# Every signing request also needs manual approval in SignPath.
+#   variables: SIGNPATH_ORGANIZATION_ID, SIGNPATH_PROJECT_SLUG,
+#              SIGNPATH_SIGNING_POLICY_SLUG
+#   secret:    SIGNPATH_API_TOKEN
+name: App (Windows)
+
+on:
+  workflow_dispatch:
+    inputs:
+      sign:
+        description: Submit the build to SignPath for signing
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths:
+      - src/**
+      - build.rs
+      - Cargo.toml
+      - Cargo.lock
+      - .github/workflows/app-windows.yml
+
+permissions:
+  contents: read
+
+env:
+  RUST_VERSION: '1.90.0'
+  TARGET: x86_64-pc-windows-gnullvm
+  LLVM_MINGW: llvm-mingw-20261104-ucrt-ubuntu-22.04-x86_64
+  LLVM_MINGW_URL: https://github.com/mstorsjo/llvm-mingw/releases/download/20261104/llvm-mingw-20261104-ucrt-ubuntu-22.04-x86_64.tar.xz
+  LLVM_MINGW_SHA256: 919380403de87dca3c581c2053230cd298af5e891286628ba0613b7fed370926
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Rust ${{ env.RUST_VERSION }}
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal --target "$TARGET"
+          echo "RUSTUP_TOOLCHAIN=$RUST_VERSION" >> "$GITHUB_ENV"
+
+      - name: llvm-mingw
+        run: |
+          curl -fsSL -o llvm-mingw.tar.xz "$LLVM_MINGW_URL"
+          echo "$LLVM_MINGW_SHA256  llvm-mingw.tar.xz" | sha256sum -c -
+          tar -xJf llvm-mingw.tar.xz -C "$RUNNER_TEMP"
+          rm llvm-mingw.tar.xz
+
+      - name: Build
+        run: |
+          L="$RUNNER_TEMP/$LLVM_MINGW/bin"
+          export CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER="$L/x86_64-w64-mingw32-clang"
+          export CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_RUSTFLAGS="-C target-feature=+crt-static"
+          export RC="$L/llvm-rc" KSAK_REQUIRE_VERSIONINFO=1
+          cargo build --release --locked --target "$TARGET"
+          mkdir -p out
+          cp "target/$TARGET/release/korea-sos-atlas-kit.exe" out/
+          # File properties must be present: SignPath checks them on every build.
+          "$L/llvm-readobj" --coff-resources out/korea-sos-atlas-kit.exe | grep -q VERSIONINFO
+          (cd out && sha256sum korea-sos-atlas-kit.exe | tee korea-sos-atlas-kit.exe.sha256)
+
+      - name: Upload unsigned build
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: korea-sos-atlas-kit-windows-x64-unsigned
+          path: out/korea-sos-atlas-kit.exe
+          if-no-files-found: error
+
+  sign:
+    needs: build
+    if: >-
+      vars.SIGNPATH_ORGANIZATION_ID != '' &&
+      (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.sign))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Submit signing request (approve it in SignPath)
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ needs.build.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 5000
+          output-artifact-directory: signed
+
+      - name: Upload signed build
+        uses: actions/upload-artifact@v4
+        with:
+          name: korea-sos-atlas-kit-windows-x64-signed
+          path: signed/korea-sos-atlas-kit.exe
+          if-no-files-found: error

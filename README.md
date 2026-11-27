@@ -215,6 +215,22 @@ Rust(Cargo)가 필요합니다.
 
 자료·모델·지도 데이터는 크기와 권리 조건 때문에 이 저장소에 넣지 않고 배포판으로 제공합니다.
 
+배포판의 앱 실행 파일 `korea-sos-atlas-kit.exe`는 GitHub Actions([.github/workflows/app-windows.yml](.github/workflows/app-windows.yml))가 이 저장소의 소스에서 빌드합니다. 사용하는 도구는 고정된 버전의 Rust 1.90.0과 llvm-mingw(SHA-256 확인)이고, 파일 속성에 제품명과 버전이 들어갑니다.
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org).
+
+> SignPath Foundation에 무료 코드 서명을 신청하는 중입니다. 승인 전에 나온 배포판(v0.1.0 포함)은 서명되지 않았습니다.
+
+- **서명하는 파일**: 이 저장소의 소스에서 GitHub Actions가 빌드한 앱 실행 파일 `korea-sos-atlas-kit.exe` 하나입니다. 배포판에 함께 들어 있는 다른 프로젝트의 프로그램은 이 프로젝트가 만든 것이 아니라서 서명하지 않고, 원래 상태 그대로 넣습니다. Organic Maps 수정판, Qt, Mesa, Visual C++ 런타임, llama.cpp가 여기에 해당합니다.
+- **역할**
+  - Committers and reviewers: [finddme](https://github.com/finddme)
+  - Approvers: [finddme](https://github.com/finddme)
+  - 서명 요청은 릴리스마다 승인자가 직접 승인합니다. 저장소와 SignPath 계정은 모두 2단계 인증(MFA)을 씁니다.
+- **Privacy policy**: This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it.
+  - 이 앱은 인터넷을 쓰지 않습니다. 함께 들어 있는 지도 프로그램은 키트가 오프라인 모드로 실행해 모든 HTTP 연결을 막습니다. AI 엔진은 이 PC 안에서만(127.0.0.1) 동작합니다.
+
 ## 라이선스
 
 앱은 **AGPL-3.0-only**입니다. 자료, 지도 데이터, 모델, 엔진은 각각의 조건을 따르며 앱 라이선스로 바뀌지 않습니다. [라이선스 범위](LICENSING.md)와 [LICENSES/](LICENSES/)를 확인하세요.
