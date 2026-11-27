@@ -19,6 +19,7 @@ unicode-casefold = "0.2"
 shell-words = "1"
 base64 = "0.22"
 percent-encoding = "2"
+miniz_oxide = "0.8"
 
 libc = "0.2"
 

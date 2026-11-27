@@ -31,6 +31,7 @@ use unicode_casefold::UnicodeCaseFold;
 use unicode_width::UnicodeWidthChar;
 mod agent_prompts;
 mod agentic_policy;
+mod ai_pack;
 mod ai_policy;
 mod ai_runtime;
 mod ai_stream;
@@ -440,6 +441,11 @@ fn ai_buttons(phase: &str, sources: usize, asked: bool, shown: usize) -> Vec<(u1
             ("[Enter 그래도 켜기]".to_string(), 12u8),
             ("[Esc 취소]".to_string(), 13),
         ]
+    } else if phase == "CONFIRM_INSTALL" {
+        vec![
+            ("[Enter 설치]".to_string(), 12u8),
+            ("[Esc 취소]".to_string(), 13),
+        ]
     } else {
         vec![(ai_button(phase).to_string(), 8u8)]
     };
@@ -465,7 +471,8 @@ fn ai_button(phase: &str) -> &'static str {
     match phase {
         "" | "OFF" | "ERROR" => "[p AI 켜기]",
         "UNAVAILABLE" => "[p AI 사용 불가 · 이유]",
-        "STARTING" => "[p 켜는 중 · 취소]",
+        "STARTING" | "INSTALLED" => "[p 켜는 중 · 취소]",
+        "INSTALLING" => "[p 설치 취소]",
         "STOPPING" => "[끄는 중…]",
         _ => "[p AI 끄기]",
     }
@@ -482,9 +489,15 @@ fn send_question(a: &mut App, engine: &mut ai_runtime::Controller) {
     a.ai_asked = true;
     match engine.status.phase.as_str() {
         "READY" => engine.submit(q),
-        "" | "OFF" | "ERROR" | "STARTING" => {
+        "" | "OFF" | "ERROR" | "STARTING" | "UNAVAILABLE" => {
             engine.start();
             match engine.status.phase.as_str() {
+                "CONFIRM_INSTALL" => {
+                    a.ai_pending = Some(q);
+                    a.notice =
+                        "AI 추가팩 zip을 찾았습니다. Enter를 누르면 설치하고 질문을 보냅니다."
+                            .into();
+                }
                 "STARTING" => {
                     a.ai_pending = Some(q);
                     a.notice = "AI를 켜는 중입니다. 준비되면 질문을 보냅니다.".into();
@@ -503,7 +516,14 @@ fn send_question(a: &mut App, engine: &mut ai_runtime::Controller) {
                 _ => a.notice = "AI를 정리하는 중입니다. 잠시 후 다시 보내세요.".into(),
             }
         }
-        "UNAVAILABLE" => a.notice = "AI를 쓸 수 없습니다. AI 답변 칸의 이유를 확인하세요.".into(),
+        "CONFIRM_INSTALL" => {
+            a.ai_pending = Some(q);
+            a.notice = "Enter를 누르면 AI 추가팩을 설치하고 질문을 보냅니다.".into();
+        }
+        "INSTALLING" | "INSTALLED" => {
+            a.ai_pending = Some(q);
+            a.notice = "AI 추가팩을 설치하는 중입니다. 끝나고 AI가 켜지면 질문을 보냅니다.".into();
+        }
         "CONFIRM_MEMORY" => {
             a.ai_pending = Some(q);
             a.notice = "메모리가 부족합니다. y를 누르면 그래도 켜고 질문을 보냅니다.".into();
@@ -701,9 +721,29 @@ fn status_sections(
     // AI
     let engine_proc = ai_runtime::engine_process();
     let mut ai = Vec::new();
-    if let Some(reason) = &engine.unavailable {
+    let installing = matches!(
+        engine.status.phase.as_str(),
+        "CONFIRM_INSTALL" | "INSTALLING" | "INSTALLED"
+    );
+    if installing {
+        let state = match engine.status.phase.as_str() {
+            "CONFIRM_INSTALL" => "AI 추가팩 설치할지 묻는 중",
+            _ => "AI 추가팩 설치 중",
+        };
+        ai.push(kv(Some(YELLOW), "상태", state.into()));
+        // First line only: "zip 2개를 찾았습니다." or the progress line.
+        let first = engine.status.text.lines().next().unwrap_or("").trim();
+        ai.push(Note(first.to_owned()));
+        ai.push(Note(
+            "설치·취소: 상단 \"2 Show AI\"에서 조작할 수 있습니다.".into(),
+        ));
+    } else if let Some(reason) = &engine.unavailable {
         ai.push(kv(Some(GREY), "상태", "사용할 수 없음".into()));
-        ai.push(Note(reason.clone()));
+        ai.push(Note(if engine.status.phase == "UNAVAILABLE" {
+            engine.status.text.clone()
+        } else {
+            reason.clone()
+        }));
     } else {
         let phase = engine.status.phase.as_str();
         let (color, state) = match phase {
@@ -1168,6 +1208,10 @@ fn draw(f: &mut Frame, a: &mut App, docs: &[Doc], rows: &[usize], ai: &Ai, bench
                 " AI ERROR [p: AI ON]".into()
             } else if ai.phase == "CONFIRM_MEMORY" {
                 " LOW MEMORY [Enter/Esc]".into()
+            } else if ai.phase == "CONFIRM_INSTALL" {
+                " AI PACK [Enter/Esc]".into()
+            } else if ai.phase == "INSTALLING" {
+                " INSTALLING [p: cancel]".into()
             } else {
                 format!(" {} [p: AI OFF]", ai.phase)
             }
@@ -1266,7 +1310,9 @@ fn draw(f: &mut Frame, a: &mut App, docs: &[Doc], rows: &[usize], ai: &Ai, bench
         if CATS[a.cat] == "대피시설" {
             origin_note = shelters::origin(docs, &a.query)
                 .map(|o| format!("기준 위치: {}", o.label))
-                .unwrap_or_else(|| "Facility names / addresses · @동네·주소 또는 @위도,경도 → 가까운 순".into());
+                .unwrap_or_else(|| {
+                    "Facility names / addresses · @동네·주소 또는 @위도,경도 → 가까운 순".into()
+                });
             &origin_note
         } else if CATS[a.cat] == "지도" {
             if str_width(maps::MAP_ATTRIBUTION) <= w - edge - 4 {
@@ -1313,7 +1359,10 @@ fn draw(f: &mut Frame, a: &mut App, docs: &[Doc], rows: &[usize], ai: &Ai, bench
             f,
             6 + i as u16,
             edge + 2,
-            &match (shelters::origin(docs, &a.query).map(|o| (o.lat, o.lon)), docs[*index].location.as_ref()) {
+            &match (
+                shelters::origin(docs, &a.query).map(|o| (o.lat, o.lon)),
+                docs[*index].location.as_ref(),
+            ) {
                 (Some(origin), Some(p)) => format!(
                     "{:.2}km 직선 · {}",
                     shelters::distance(origin, p),
@@ -1971,7 +2020,8 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
                         a.notice.clear();
                         dirty = true;
                     }
-                    "STARTING" | "CONFIRM_MEMORY" => {}
+                    "STARTING" | "CONFIRM_MEMORY" | "CONFIRM_INSTALL" | "INSTALLING"
+                    | "INSTALLED" => {}
                     _ => {
                         a.ai_pending = None;
                         a.notice = "AI가 켜지지 않아 질문을 보내지 못했습니다. AI 답변 칸의 안내를 확인하세요.".into();
@@ -2069,8 +2119,10 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
                 }
                 // Enter/Esc also work while a Korean input method is composing,
                 // which can hold back a single y/n key.
-                if engine.status.phase == "CONFIRM_MEMORY"
-                    && !a.ai_editing
+                if matches!(
+                    engine.status.phase.as_str(),
+                    "CONFIRM_MEMORY" | "CONFIRM_INSTALL"
+                ) && !a.ai_editing
                     && !a.editing
                     && matches!(
                         k.code,
@@ -2080,10 +2132,10 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
                     )
                 {
                     if matches!(k.code, KeyCode::Char('y' | 'Y' | 'ㅛ') | KeyCode::Enter) {
-                        engine.confirm_low_memory();
+                        engine.confirm();
                         a.notice.clear();
                     } else {
-                        engine.decline_low_memory();
+                        engine.decline();
                         a.ai_pending = None;
                         a.notice = "AI를 켜지 않았습니다.".into();
                     }
@@ -2231,11 +2283,11 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
                                 17 => a.notice = maps::reset_software_gl(pdf),
                                 18 => a.notice = open_folder(&licenses_dir(pdf)),
                                 12 => {
-                                    engine.confirm_low_memory();
+                                    engine.confirm();
                                     a.notice.clear();
                                 }
                                 13 => {
-                                    engine.decline_low_memory();
+                                    engine.decline();
                                     a.ai_pending = None;
                                     a.notice = "AI를 켜지 않았습니다.".into();
                                 }
@@ -2293,8 +2345,11 @@ fn run(docs: &[Doc], pdf: &Path, state: Option<&Path>) -> io::Result<()> {
                                 }
                                 7 => {
                                     if let Some(i) = a.opened {
-                                        a.notice =
-                                            maps::destination(pdf, docs[i].location.as_ref(), &docs);
+                                        a.notice = maps::destination(
+                                            pdf,
+                                            docs[i].location.as_ref(),
+                                            &docs,
+                                        );
                                     }
                                 }
                                 _ => {}

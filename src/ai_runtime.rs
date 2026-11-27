@@ -47,6 +47,10 @@ pub struct Controller {
     pub unavailable: Option<String>,
     /// The user chose to start despite low memory (CONFIRM_MEMORY → y).
     low_memory_ok: bool,
+    /// AI pack zips found when AI was turned on (CONFIRM_INSTALL).
+    install_zips: Option<[PathBuf; 2]>,
+    /// The worker is unpacking the AI pack, not running the model.
+    installing: bool,
 }
 
 /// Available-memory tiers for starting the model (KiB). Measured 2026-11-25 on
@@ -73,6 +77,61 @@ pub fn memory_level(available_kib: Option<u64>) -> MemoryLevel {
 }
 pub fn gib(kib: u64) -> String {
     format!("{:.1}GB", kib as f64 / (1024.0 * 1024.0))
+}
+/// What turning AI on says when model or engine files are missing.
+fn install_offer(
+    found: [Option<PathBuf>; 2],
+    reason: &str,
+    keep: &mut Option<[PathBuf; 2]>,
+) -> Update {
+    *keep = None;
+    match found {
+        [Some(a), Some(b)] => {
+            let name = |p: &Path| {
+                p.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            };
+            let place = match (a.parent(), b.parent()) {
+                (Some(x), Some(y)) if x == y => {
+                    format!("  폴더: {}\n  {}\n  {}", x.display(), name(&a), name(&b))
+                }
+                _ => format!("  {}\n  {}", a.display(), b.display()),
+            };
+            let text = format!(
+                "AI 추가팩 zip 2개를 찾았습니다.\n{place}\n\n이 키트 폴더에 풀어서 설치할까요? 파일을 모두 확인한 뒤 AI를 켭니다. 약 3GB의 저장 공간이 필요하고, 몇 분 걸릴 수 있습니다. 받은 zip은 그대로 둡니다.\n\n[Enter 또는 y] 설치    [Esc 또는 n] 취소"
+            );
+            *keep = Some([a, b]);
+            Update::new("CONFIRM_INSTALL", text)
+        }
+        [Some(p), None] | [None, Some(p)] => {
+            let have = p
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let missing = if have.contains("pack-1") {
+                crate::ai_pack::PACKS[1]
+            } else {
+                crate::ai_pack::PACKS[0]
+            };
+            Update::new(
+                "UNAVAILABLE",
+                format!(
+                    "AI 추가팩 zip이 하나만 있습니다({}). {missing}.zip도 받아 같은 폴더에 두고 다시 p를 누르세요. 자료 검색·대피시설·지도는 그대로 쓸 수 있습니다.",
+                    p.display()
+                ),
+            )
+        }
+        [None, None] => Update::new("UNAVAILABLE", reason.to_string()),
+    }
+}
+fn install_progress_text(done: u64, total: u64) -> String {
+    let pct = if total == 0 { 0 } else { done * 100 / total };
+    format!(
+        "AI 추가팩을 풀고 파일을 확인하는 중입니다… {pct}% ({} / {})\n\n[p]를 누르면 취소합니다. 취소하면 풀던 파일은 지우고 키트 폴더는 그대로 둡니다.",
+        crate::ai_pack::gb(done),
+        crate::ai_pack::gb(total)
+    )
 }
 fn low_memory_text(kib: u64) -> String {
     format!(
@@ -109,11 +168,15 @@ impl Controller {
             retained: None,
             unavailable,
             low_memory_ok: false,
+            install_zips: None,
+            installing: false,
         }
     }
     pub fn toggle(&mut self) {
         if self.status.phase == "CONFIRM_MEMORY" {
             self.decline_low_memory()
+        } else if self.status.phase == "CONFIRM_INSTALL" {
+            self.decline_install()
         } else if self.worker.is_some() {
             self.stop()
         } else {
@@ -124,8 +187,18 @@ impl Controller {
         if self.worker.is_some() {
             return;
         }
+        // The user may have unpacked the AI pack while the app was open.
+        self.unavailable = crate::layout::ai_unavailable_reason(&self.root);
         if let Some(reason) = &self.unavailable {
-            self.status = Update::new("UNAVAILABLE", reason.clone());
+            self.status = if crate::layout::ai_files_missing(&self.root) {
+                install_offer(
+                    crate::ai_pack::find(&self.root),
+                    reason,
+                    &mut self.install_zips,
+                )
+            } else {
+                Update::new("UNAVAILABLE", reason.clone())
+            };
             return;
         }
         if !memory_check_skipped() && !std::mem::take(&mut self.low_memory_ok) {
@@ -170,6 +243,82 @@ impl Controller {
             self.start();
         }
     }
+    /// Enter/y on whichever question is open (low memory or AI pack install).
+    pub fn confirm(&mut self) {
+        match self.status.phase.as_str() {
+            "CONFIRM_MEMORY" => self.confirm_low_memory(),
+            "CONFIRM_INSTALL" => self.confirm_install(),
+            _ => {}
+        }
+    }
+    /// Esc/n on whichever question is open.
+    pub fn decline(&mut self) {
+        match self.status.phase.as_str() {
+            "CONFIRM_MEMORY" => self.decline_low_memory(),
+            "CONFIRM_INSTALL" => self.decline_install(),
+            _ => {}
+        }
+    }
+    /// `y` on the install question: unpack the AI pack, then turn AI on.
+    pub fn confirm_install(&mut self) {
+        if self.status.phase != "CONFIRM_INSTALL" || self.worker.is_some() {
+            return;
+        }
+        let Some(zips) = self.install_zips.take() else {
+            return;
+        };
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.cancel = cancel.clone();
+        self.retained = None;
+        self.installing = true;
+        let (utx, urx) = mpsc::channel();
+        self.updates = Some(urx);
+        self.status = Update::new("INSTALLING", install_progress_text(0, 0));
+        let root = self.root.clone();
+        self.worker = Some(thread::spawn(move || {
+            let mut shown = u64::MAX;
+            let result = crate::ai_pack::install(&root, &zips, &cancel, &mut |done, total| {
+                let pct = if total == 0 { 0 } else { done * 100 / total };
+                if pct != shown {
+                    shown = pct;
+                    let _ = utx.send(Update::new(
+                        "INSTALLING",
+                        install_progress_text(done, total),
+                    ));
+                }
+            });
+            match result {
+                Ok(placed) => {
+                    if let Ok(mut v) = VERIFIED.lock() {
+                        for (path, sha) in placed {
+                            if let Ok(m) = fs::metadata(&path) {
+                                v.retain(|e| e.0 != path);
+                                v.push((path, m.len(), m.modified().ok(), sha));
+                            }
+                        }
+                    }
+                    let _ = utx.send(Update::new("INSTALLED", ""));
+                }
+                Err(e) if !cancel.load(Ordering::Acquire) => {
+                    let _ = utx.send(Update::new(
+                        "ERROR",
+                        format!("AI 추가팩을 설치하지 못했습니다. 키트 폴더는 설치 전 그대로입니다. 자료 검색·대피시설·지도는 그대로 쓸 수 있습니다.\n{e}"),
+                    ));
+                }
+                Err(_) => {}
+            }
+        }));
+    }
+    /// `n` on the install question.
+    pub fn decline_install(&mut self) {
+        if self.status.phase == "CONFIRM_INSTALL" {
+            self.install_zips = None;
+            self.status = Update::new(
+                "UNAVAILABLE",
+                "AI 추가팩을 설치하지 않았습니다. 설치하려면 다시 p를 누르세요. 자료 검색·대피시설·지도는 그대로 쓸 수 있습니다.",
+            );
+        }
+    }
     /// `n` on the low-memory question: stay off.
     pub fn decline_low_memory(&mut self) {
         if self.status.phase == "CONFIRM_MEMORY" {
@@ -183,10 +332,14 @@ impl Controller {
             }
             self.cancel.store(true, Ordering::Release);
             self.commands.take();
-            self.status = Update::new(
-                "STOPPING",
-                "Cancelling requests and releasing model memory…",
-            );
+            self.status = if self.installing {
+                Update::new("STOPPING", "AI 추가팩 설치를 취소하는 중입니다…")
+            } else {
+                Update::new(
+                    "STOPPING",
+                    "Cancelling requests and releasing model memory…",
+                )
+            };
         }
     }
     pub fn submit(&mut self, q: String) {
@@ -220,6 +373,21 @@ impl Controller {
             }
             self.commands = None;
             self.updates = None;
+            if std::mem::take(&mut self.installing) {
+                if result.is_ok() && self.status.phase == "INSTALLED" {
+                    self.start();
+                    let done = "AI 추가팩을 설치했습니다. 받은 zip 2개는 이제 지워도 됩니다.";
+                    self.status.text = format!("{done}\n\n{}", self.status.text);
+                } else if result.is_err() {
+                    self.status = Update::new("ERROR", "AI 추가팩 설치가 예기치 않게 멈췄습니다. 키트 폴더는 설치 전 그대로입니다. 다시 p를 누르세요.");
+                } else if self.status.phase != "ERROR" {
+                    self.status = Update::new(
+                        "UNAVAILABLE",
+                        "AI 추가팩 설치를 취소했습니다. 풀던 파일은 지웠습니다. 다시 설치하려면 p를 누르세요.",
+                    );
+                }
+                return true;
+            }
             #[cfg(all(target_os = "linux", target_env = "gnu"))]
             unsafe {
                 libc::malloc_trim(0);

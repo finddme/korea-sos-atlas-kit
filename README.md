@@ -54,15 +54,14 @@ Organic Maps 이름·로고·지도 고지는 그대로 두고, 창 제목과 �
 | **Atlas** | `korea-sos-atlas-kit-atlas-windows-x64.zip` | 약 430MB | 자료 검색·열람, 대피시설 찾기, 지도 |
 | **Atlas + AI** | 위 파일 + `korea-sos-atlas-kit-ai-pack-1.zip` + `korea-sos-atlas-kit-ai-pack-2.zip` | 약 3.2GB | Atlas 기능 + 로컬 AI 답변 |
 
-AI 없이도 자료·대피시설·지도는 모두 씁니다. AI 추가팩은 나중에 받아 더해도 됩니다.
+AI 없이도 자료·대피시설·지도는 모두 씁니다. AI 추가팩은 나중에 받아 더해도 됩니다. AI 추가팩 zip은 **풀지 않아도 됩니다**. 앱이 찾아서 설치합니다(아래 4).
 
 ### 2. 압축 풀기
 
-받은 zip을 **모두 같은 위치**에 풉니다. 세 파일 모두 안에 `KoreaSOSAtlasKit` 폴더가 있어서, 같은 위치에 풀면 한 폴더로 합쳐집니다.
+**Atlas zip 하나만** 풉니다.
 
-1. zip 파일을 마우스 오른쪽 단추로 누르고 **압축 풀기**를 고릅니다.
-2. 위치 입력칸 끝에 붙는 zip 이름(예: `\korea-sos-atlas-kit-atlas-windows-x64`)을 지우고, 세 파일 모두 **같은 위치**(예: `D:\` 또는 USB 드라이브)를 지정합니다.
-3. 풀고 나면 `KoreaSOSAtlasKit` 폴더 하나가 생깁니다. AI 추가팩까지 풀었다면 그 안의 `data\models`에 모델 파일 2개가 있어야 합니다.
+1. `korea-sos-atlas-kit-atlas-windows-x64.zip`을 마우스 오른쪽 단추로 누르고 **압축 풀기**를 고릅니다.
+2. 원하는 위치(예: `D:\` 또는 USB 드라이브)를 지정합니다. 풀고 나면 `KoreaSOSAtlasKit` 폴더가 생깁니다.
 
 ### 3. 실행
 
@@ -71,6 +70,14 @@ AI 없이도 자료·대피시설·지도는 모두 씁니다. AI 추가팩은 �
 - **"Windows의 PC 보호" 창이 뜨면**: 인터넷에서 받은 서명 없는 프로그램이라 Windows가 확인을 요청하는 것입니다. **추가 정보** → **실행**을 누르세요. 받은 파일이 맞는지는 Releases의 `SHA256SUMS.txt`와 비교해 확인할 수 있습니다(PowerShell: `Get-FileHash 파일이름`).
 - 폴더째 USB에 복사하면 다른 Windows PC에서도 그대로 씁니다. 설치나 관리자 권한이 필요 없습니다.
 - 지원 운영체제: Windows 10/11 x64.
+
+### 4. AI 추가팩 설치 (Atlas + AI)
+
+1. AI 추가팩 zip 2개(`ai-pack-1`, `ai-pack-2`)는 받은 그대로 둡니다. 앱은 **다운로드 폴더**, `KoreaSOSAtlasKit` 폴더, 그리고 그 위 폴더들에서 zip을 찾습니다. 다른 곳에 받았다면 zip 2개를 `KoreaSOSAtlasKit` 폴더에 옮겨 두세요.
+2. 앱에서 `p`를 누르면(또는 AI 칸에 질문을 쓰고 `Enter`) 찾은 zip 2개를 보여 주고 설치할지 묻습니다. `Enter`를 누르면 zip을 풀고 모든 파일의 SHA-256을 확인한 뒤 AI를 켭니다. 약 3GB 여유 공간이 필요하고 몇 분 걸릴 수 있습니다. `p`로 취소할 수 있고, 취소하거나 확인에 실패하면 키트 폴더는 설치 전 그대로 남습니다.
+3. 설치가 끝나면 받은 zip 2개는 지워도 됩니다. 폴더째 USB에 복사하면 AI도 함께 옮겨집니다.
+
+zip 3개를 직접 같은 위치에 풀어도 됩니다(세 zip 모두 안에 `KoreaSOSAtlasKit` 폴더가 있어 한 폴더로 합쳐짐). 이 경우 `data\models`에 모델 파일 2개가 있어야 합니다.
 
 ## 사용 설명서
 
@@ -185,7 +192,9 @@ KoreaSOSAtlasKit/
 | 증상 | 해결 |
 |---|---|
 | "Windows의 PC 보호" 창이 뜸 | **추가 정보** → **실행**. 받은 파일이 맞는지는 `SHA256SUMS.txt`로 확인 |
-| AI를 켜면 "AI 추가팩이 없습니다" | AI 추가팩 2개를 받아 Atlas와 **같은 위치**에 풀었는지, `data\models`에 파일 2개가 있는지 확인 |
+| AI를 켜면 "AI 추가팩이 없습니다" | AI 추가팩 zip 2개를 받아 다운로드 폴더나 `KoreaSOSAtlasKit` 폴더에 두고 다시 `p`. 파일 이름을 바꿨다면 `korea-sos-atlas-kit-ai-pack-1.zip`, `-2.zip`으로 되돌리기 |
+| AI 추가팩 설치가 "해시가 … 다릅니다"로 멈춤 | 받는 중 파일이 손상됐거나 다른 버전의 zip입니다. Atlas와 같은 릴리스의 AI 추가팩을 다시 받으세요 |
+| "저장 공간이 부족합니다" | 키트가 있는 드라이브에 약 3GB를 비우거나, 여유가 있는 드라이브로 `KoreaSOSAtlasKit` 폴더를 옮긴 뒤 다시 `p` |
 | AI가 메모리 부족이라며 켜지지 않음 | 브라우저 창 등 다른 프로그램을 닫은 뒤 다시 `p` |
 | 지도가 열리지 않거나 하얀 화면 | 지도 창을 닫고 다시 `4`. 그래픽 문제로 바로 꺼지면 앱이 CPU 렌더링으로 다시 엽니다. 그래픽 카드로 되돌리려면 `[3 Status]`에서 `[g Use graphics card]` |
 | 한글이 깨지거나 칸이 어긋남 | Windows Terminal에서 실행하거나 창 크기를 키워 보세요 |

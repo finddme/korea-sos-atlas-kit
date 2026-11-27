@@ -180,7 +180,19 @@ pub fn ai_assets(data: &Path) -> Result<AiAssets, String> {
     })
 }
 
-pub const AI_PACK_MISSING: &str = "AI 추가팩이 없습니다. 배포 페이지(Releases)에서 AI 추가팩 2개(ai-pack-1, ai-pack-2)를 받아 이 앱과 같은 위치에 풀면 AI를 쓸 수 있습니다. 자료 검색·대피시설·지도는 그대로 쓸 수 있습니다.";
+pub const AI_PACK_MISSING: &str = "AI 추가팩이 없습니다. 배포 페이지(Releases)에서 AI 추가팩 zip 2개(ai-pack-1, ai-pack-2)를 받아 다운로드 폴더나 이 키트 폴더에 두고 p를 누르면 앱이 설치합니다. 자료 검색·대피시설·지도는 그대로 쓸 수 있습니다.";
+
+/// The manifest is readable but some model or engine file is not there yet:
+/// the AI pack can be installed from its zips (see `ai_pack`).
+pub fn ai_files_missing(data: &Path) -> bool {
+    ai_assets(data).is_ok_and(|a| {
+        std::iter::once(&a.model)
+            .chain(&a.model_parts)
+            .chain(std::iter::once(&a.engine))
+            .chain(&a.engine_libs)
+            .any(|x| !x.path.is_file())
+    })
+}
 
 /// Cheap startup check: manifest readable and both files present. Hashes are
 /// verified later, when the user turns AI on.
