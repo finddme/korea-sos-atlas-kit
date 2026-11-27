@@ -19,7 +19,11 @@ fn file_hash(path: &Path) -> io::Result<String> {
 }
 static RUNNING: AtomicBool = AtomicBool::new(false);
 
-pub(super) fn destination(root: &Path, location: Option<&shelters::Location>, docs: &[Doc]) -> String {
+pub(super) fn destination(
+    root: &Path,
+    location: Option<&shelters::Location>,
+    docs: &[Doc],
+) -> String {
     let Some(location) = location else {
         return "No verified coordinates for this record".into();
     };
@@ -356,7 +360,11 @@ pub(super) fn reset_software_gl(root: &Path) -> String {
 /// The viewer's saved-places folder (Organic Maps: SettingsDir()/bookmarks).
 fn bookmarks_dir(root: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let state = state_dir(root)?;
-    Ok(if cfg!(windows) { state.join("settings").join("bookmarks") } else { state.join("config").join("OMaps").join("bookmarks") })
+    Ok(if cfg!(windows) {
+        state.join("settings").join("bookmarks")
+    } else {
+        state.join("config").join("OMaps").join("bookmarks")
+    })
 }
 pub(super) fn launch(root: &Path, docs: &[Doc]) -> String {
     if RUNNING.swap(true, Ordering::SeqCst) {

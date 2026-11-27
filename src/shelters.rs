@@ -30,15 +30,23 @@ thread_local! {
 pub(super) fn place_query(query: &str) -> Option<&str> {
     let q = query.trim();
     let place = q.strip_prefix('@')?.trim();
-    (near(q).is_none() && place.chars().filter(|c| !c.is_whitespace()).count() >= 2).then_some(place)
+    (near(q).is_none() && place.chars().filter(|c| !c.is_whitespace()).count() >= 2)
+        .then_some(place)
 }
 pub(super) fn origin(docs: &[Doc], query: &str) -> Option<Origin> {
     if let Some((lat, lon)) = near(query) {
-        return Some(Origin { lat, lon, label: format!("좌표 {lat:.4}, {lon:.4}") });
+        return Some(Origin {
+            lat,
+            lon,
+            label: format!("좌표 {lat:.4}, {lon:.4}"),
+        });
     }
     let place = place_query(query)?;
     if let Some(hit) = ORIGIN_CACHE.with(|c| {
-        c.borrow().as_ref().filter(|(k, n, _)| k == place && *n == docs.len()).map(|(_, _, o)| o.clone())
+        c.borrow()
+            .as_ref()
+            .filter(|(k, n, _)| k == place && *n == docs.len())
+            .map(|(_, _, o)| o.clone())
     }) {
         return hit;
     }
@@ -53,14 +61,23 @@ fn name_and_address(title: &str) -> (&str, &str) {
 }
 /// "서울특별시 중구 태평로1가 31" -> "서울특별시 중구"
 fn district(address: &str) -> String {
-    address.split_whitespace().take(2).collect::<Vec<_>>().join(" ")
+    address
+        .split_whitespace()
+        .take(2)
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 fn resolve_place(docs: &[Doc], place: &str) -> Option<Origin> {
-    let words: Vec<String> = place.split_whitespace().map(|w| w.case_fold().collect()).collect();
+    let words: Vec<String> = place
+        .split_whitespace()
+        .map(|w| w.case_fold().collect())
+        .collect();
     let mut by_name = Vec::new();
     let mut by_address = Vec::new();
     for d in docs.iter().filter(|d| d.id.starts_with("shelter:")) {
-        let Some(p) = d.location.as_ref().filter(|p| p.valid()) else { continue };
+        let Some(p) = d.location.as_ref().filter(|p| p.valid()) else {
+            continue;
+        };
         let (name, address) = name_and_address(&d.title);
         let n = name.case_fold().collect::<String>();
         let full = format!("{n} {}", address.case_fold().collect::<String>());
@@ -68,9 +85,17 @@ fn resolve_place(docs: &[Doc], place: &str) -> Option<Origin> {
             continue;
         }
         let hit = (p.lat, p.lon, name.to_owned(), district(address));
-        if words.iter().any(|w| n.contains(w.as_str())) { by_name.push(hit) } else { by_address.push(hit) }
+        if words.iter().any(|w| n.contains(w.as_str())) {
+            by_name.push(hit)
+        } else {
+            by_address.push(hit)
+        }
     }
-    let (hits, kind) = if !by_name.is_empty() { (by_name, "이름") } else { (by_address, "주소") };
+    let (hits, kind) = if !by_name.is_empty() {
+        (by_name, "이름")
+    } else {
+        (by_address, "주소")
+    };
     if hits.is_empty() {
         return None;
     }
@@ -95,11 +120,22 @@ fn resolve_place(docs: &[Doc], place: &str) -> Option<Origin> {
     let mut label = if cluster.len() == 1 && kind == "이름" {
         format!("'{place}' → {} ({main})", cluster[0].2)
     } else {
-        format!("'{place}'이(가) {kind}에 있는 {main} 시설 {}곳의 중앙 (대략)", cluster.len())
+        format!(
+            "'{place}'이(가) {kind}에 있는 {main} 시설 {}곳의 중앙 (대략)",
+            cluster.len()
+        )
     };
     if counts.len() > 1 {
-        let others: Vec<String> = counts[1..].iter().take(2).map(|(d, n)| format!("{d} {n}")).collect();
-        label.push_str(&format!(" · 다른 지역: {} → 예: @{} {place}", others.join(", "), counts[1].0.split_whitespace().last().unwrap_or("")));
+        let others: Vec<String> = counts[1..]
+            .iter()
+            .take(2)
+            .map(|(d, n)| format!("{d} {n}"))
+            .collect();
+        label.push_str(&format!(
+            " · 다른 지역: {} → 예: @{} {place}",
+            others.join(", "),
+            counts[1].0.split_whitespace().last().unwrap_or("")
+        ));
     }
     Some(Origin { lat, lon, label })
 }

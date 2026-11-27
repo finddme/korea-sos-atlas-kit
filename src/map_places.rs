@@ -11,9 +11,22 @@ const PREFIX: &str = "korea-sos-";
 /// Hidden below this zoom so the country view stays readable and fast.
 const MIN_ZOOM: u8 = 13;
 const PROVINCES: &[&str] = &[
-    "서울특별시", "부산광역시", "대구광역시", "인천광역시", "대전광역시", "울산광역시", "세종특별자치시",
-    "경기도", "강원특별자치도", "충청북도", "충청남도", "전북특별자치도", "전남광주통합특별시",
-    "경상북도", "경상남도", "제주특별자치도",
+    "서울특별시",
+    "부산광역시",
+    "대구광역시",
+    "인천광역시",
+    "대전광역시",
+    "울산광역시",
+    "세종특별자치시",
+    "경기도",
+    "강원특별자치도",
+    "충청북도",
+    "충청남도",
+    "전북특별자치도",
+    "전남광주통합특별시",
+    "경상북도",
+    "경상남도",
+    "제주특별자치도",
 ];
 
 struct Place<'a> {
@@ -42,11 +55,27 @@ fn places(docs: &[Doc]) -> Vec<(String, Place<'_>)> {
         .filter(|d| d.id.starts_with("shelter:") && !d.id.starts_with("shelter:hospital:"))
         .filter_map(|d| {
             let p = d.location.as_ref().filter(|p| p.valid())?;
-            let rest = d.title.split_once("] ").map_or(d.title.as_str(), |(_, r)| r);
+            let rest = d
+                .title
+                .split_once("] ")
+                .map_or(d.title.as_str(), |(_, r)| r);
             let (name, address) = rest.split_once(" · ").unwrap_or((rest, ""));
             let first = address.split_whitespace().next().unwrap_or("");
-            let province = if PROVINCES.contains(&first) { first.to_owned() } else { "기타 지역".to_owned() };
-            Some((province, Place { lat: p.lat, lon: p.lon, name, address, water: d.id.starts_with("shelter:water:") }))
+            let province = if PROVINCES.contains(&first) {
+                first.to_owned()
+            } else {
+                "기타 지역".to_owned()
+            };
+            Some((
+                province,
+                Place {
+                    lat: p.lat,
+                    lon: p.lon,
+                    name,
+                    address,
+                    water: d.id.starts_with("shelter:water:"),
+                },
+            ))
         })
         .collect()
 }
@@ -59,7 +88,11 @@ fn kml(province: &str, list: &[&Place]) -> String {
         xml(province)
     ));
     for p in list {
-        let (kind, style, icon) = if p.water { ("비상급수", "placemark-blue", "Water") } else { ("민방위", "placemark-red", "Building") };
+        let (kind, style, icon) = if p.water {
+            ("비상급수", "placemark-blue", "Water")
+        } else {
+            ("민방위", "placemark-red", "Building")
+        };
         out.push_str(&format!(
             "  <Placemark>\n    <name>[{kind}] {}</name>\n    <description>{}</description>\n    <styleUrl>#{style}</styleUrl>\n    <Point><coordinates>{:.7},{:.7}</coordinates></Point>\n    <ExtendedData xmlns:mwm=\"https://omaps.app\">\n      <mwm:icon>{icon}</mwm:icon>\n      <mwm:minZoom>{MIN_ZOOM}</mwm:minZoom>\n    </ExtendedData>\n  </Placemark>\n",
             xml(p.name),
@@ -77,8 +110,16 @@ fn kml(province: &str, list: &[&Place]) -> String {
 pub(super) fn write(dir: &Path, docs: &[Doc]) -> io::Result<usize> {
     let all = places(docs);
     let mut groups: Vec<(&str, Vec<&Place>)> = Vec::new();
-    for name in PROVINCES.iter().copied().chain(std::iter::once("기타 지역")) {
-        let list: Vec<&Place> = all.iter().filter(|(p, _)| p == name).map(|(_, x)| x).collect();
+    for name in PROVINCES
+        .iter()
+        .copied()
+        .chain(std::iter::once("기타 지역"))
+    {
+        let list: Vec<&Place> = all
+            .iter()
+            .filter(|(p, _)| p == name)
+            .map(|(_, x)| x)
+            .collect();
         if !list.is_empty() {
             groups.push((name, list));
         }
@@ -121,7 +162,11 @@ mod tests {
     use super::*;
     fn doc(id: &str, title: &str, lat: f64, lon: f64) -> Doc {
         Doc {
-            location: Some(shelters::Location { lat, lon, name: "x".into() }),
+            location: Some(shelters::Location {
+                lat,
+                lon,
+                name: "x".into(),
+            }),
             id: id.into(),
             title: title.into(),
             categories: vec!["대피시설".into()],
@@ -142,9 +187,24 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("my-own.kml"), "user").unwrap();
         let docs = vec![
-            doc("shelter:1", "[민방위] 시청 <지하> & 역 · 서울특별시 중구 태평로1가 31", 37.5662, 126.9777),
-            doc("shelter:water:2", "[비상급수] 학교 · 부산광역시 해운대구 우동 1", 35.16, 129.16),
-            doc("shelter:hospital:3", "[응급의료 주소] 병원 · 서울특별시 중구", 37.5, 127.0),
+            doc(
+                "shelter:1",
+                "[민방위] 시청 <지하> & 역 · 서울특별시 중구 태평로1가 31",
+                37.5662,
+                126.9777,
+            ),
+            doc(
+                "shelter:water:2",
+                "[비상급수] 학교 · 부산광역시 해운대구 우동 1",
+                35.16,
+                129.16,
+            ),
+            doc(
+                "shelter:hospital:3",
+                "[응급의료 주소] 병원 · 서울특별시 중구",
+                37.5,
+                127.0,
+            ),
         ];
         assert_eq!(write(&dir, &docs).unwrap(), 2);
         let seoul = fs::read_to_string(dir.join("korea-sos-01.kml")).unwrap();
@@ -157,7 +217,10 @@ mod tests {
         // the viewer may resave a list (e.g. hidden); the same data is not rewritten
         fs::write(dir.join("korea-sos-01.kml"), "resaved by viewer").unwrap();
         write(&dir, &docs).unwrap();
-        assert_eq!(fs::read_to_string(dir.join("korea-sos-01.kml")).unwrap(), "resaved by viewer");
+        assert_eq!(
+            fs::read_to_string(dir.join("korea-sos-01.kml")).unwrap(),
+            "resaved by viewer"
+        );
         assert_eq!(fs::read_to_string(dir.join("my-own.kml")).unwrap(), "user");
         let _ = fs::remove_dir_all(&dir);
     }
