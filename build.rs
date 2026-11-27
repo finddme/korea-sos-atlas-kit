@@ -23,7 +23,11 @@ fn main() {
         .take(3)
         .map(|n| n.parse().unwrap_or(0))
         .collect();
-    let (a, b, c) = (nums[0], nums.get(1).copied().unwrap_or(0), nums.get(2).copied().unwrap_or(0));
+    let (a, b, c) = (
+        nums[0],
+        nums.get(1).copied().unwrap_or(0),
+        nums.get(2).copied().unwrap_or(0),
+    );
     let rc = format!(
         r#"#pragma code_page(65001)
 1 VERSIONINFO
