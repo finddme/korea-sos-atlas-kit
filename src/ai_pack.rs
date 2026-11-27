@@ -662,6 +662,16 @@ mod tests {
     }
 
     #[test]
+    fn downloads_folder_and_free_space_are_found() {
+        let d = downloads_dir().expect("Downloads folder");
+        eprintln!("downloads: {}", d.display());
+        assert!(d.is_absolute());
+        let free = free_space(&std::env::temp_dir()).expect("free space");
+        eprintln!("free: {}", gb(free));
+        assert!(free > 0);
+    }
+
+    #[test]
     fn notices_and_paths() {
         assert!(is_notice("models/MODELS.md"));
         assert!(is_notice("runtime/llama.cpp-win-x64/LICENSE-llama.cpp"));
