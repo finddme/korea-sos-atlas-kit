@@ -66,14 +66,18 @@ Organic Maps 이름/로고/지도 고지는 그대로 유지하고 창 제목과
 
 **Atlas zip 하나만** 압축 해제.
 
-1. `korea-sos-atlas-kit-atlas-windows-x64.zip`을 마우스 오른쪽 단추로 누르고 **압축 풀기** 선택.
-2. 원하는 위치(예: `D:\` 또는 USB 드라이브) 지정. 풀고 나면 `KoreaSOSAtlasKit` 폴더가 생긴다.
+1. **차단 해제(권장)**: 현재 배포판은 코드 서명이 없어 그대로 풀면 실행할 때 "Windows의 PC 보호" 창이 뜬다. 압축을 풀기 전에 zip의 차단을 해제하면 이 창 없이 실행된다.
+   1. 받은 파일이 맞는지 먼저 확인. PowerShell에서 `Get-FileHash 파일이름`을 실행해 Releases의 `SHA256SUMS.txt` 값과 비교.
+   2. zip을 마우스 오른쪽 단추로 누르고 **속성** 선택.
+   3. **일반** 탭 아래 "보안" 줄의 **차단 해제** 체크 → **확인**. 이 줄이 없으면 이미 해제된 상태.
+2. `korea-sos-atlas-kit-atlas-windows-x64.zip`을 마우스 오른쪽 단추로 누르고 **압축 풀기** 선택.
+3. 원하는 위치(예: `D:\` 또는 USB 드라이브) 지정. 풀고 나면 `KoreaSOSAtlasKit` 폴더가 생긴다.
 
 ### 3. 실행
 
 `KoreaSOSAtlasKit\korea-sos-atlas-kit.exe`를 더블클릭하면 검은 창(터미널)에 앱이 열린다.
 
-- **"Windows의 PC 보호" 창이 뜨면**: 인터넷에서 받은 서명 없는 프로그램이라 Windows가 확인을 요청하는 것. **추가 정보** → **실행** 클릭.
+- **"Windows의 PC 보호" 창이 뜨면**: 인터넷에서 받은 서명 없는 프로그램이라 Windows가 확인을 요청하는 것. **추가 정보** → **실행** 클릭. 다음부터는 뜨지 않게 하려면 위 2의 차단 해제 참고.
   - 받은 파일이 맞는지는 Releases의 `SHA256SUMS.txt`와 비교해 확인(PowerShell: `Get-FileHash 파일이름`).
 - 폴더째 USB에 복사하면 다른 Windows PC에서도 그대로 쓸 수 있다. 설치나 관리자 권한 불필요.
 - 지원 운영체제: Windows 10/11 x64.
@@ -239,7 +243,8 @@ KoreaSOSAtlasKit/
 
 | 증상 | 해결 |
 |---|---|
-| "Windows의 PC 보호" 창이 뜸 | **추가 정보** → **실행**. 받은 파일이 맞는지는 `SHA256SUMS.txt`로 확인 |
+| "Windows의 PC 보호" 창이 뜸 | **추가 정보** → **실행**. 받은 파일이 맞는지는 `SHA256SUMS.txt`로 확인. 압축을 풀기 전에 zip의 차단을 해제하면 뜨지 않음([설치하기 2](#2-압축-풀기)) |
+| "추가 정보" 단추 없이 실행이 막힘 | Windows 11의 스마트 앱 컨트롤이 켜진 PC에서는 서명 없는 앱이 차단될 수 있음. 현재 배포판은 서명이 없어 이 경우 실행 불가 |
 | AI를 켜면 "AI 추가팩이 없습니다" | AI 추가팩 zip 2개를 받아 다운로드 폴더나 `KoreaSOSAtlasKit` 폴더에 두고 다시 `p`. 파일 이름을 바꿨다면 `korea-sos-atlas-kit-ai-pack-1.zip`, `-2.zip`으로 복원 |
 | AI 추가팩 설치가 "해시가 … 다릅니다"로 멈춤 | 받는 중 파일이 손상됐거나 다른 버전의 zip. Atlas와 같은 릴리스의 AI 추가팩을 다시 받기 |
 | "저장 공간이 부족합니다" | 키트가 있는 드라이브에 약 3GB 확보. 또는 여유가 있는 드라이브로 `KoreaSOSAtlasKit` 폴더를 옮긴 뒤 다시 `p` |
@@ -268,19 +273,18 @@ Rust(Cargo) 필요.
 - 빌드 도구: 버전을 고정한 Rust 1.90.0과 llvm-mingw(SHA-256 확인)
 - 파일 속성에 제품명과 버전 포함
 
-## Code signing policy
+## 코드 서명
 
-Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org).
+현재 배포판(v0.1.0 포함)은 코드 서명되지 않았다.
 
-> SignPath Foundation에 무료 코드 서명을 신청하는 중. 승인 전에 나온 배포판(v0.1.0 포함)은 서명되지 않았다.
+- 그래서 인터넷에서 받은 zip을 그대로 풀어 실행하면 "Windows의 PC 보호" 창이 뜬다.
+  - 압축을 풀기 전에 zip의 차단을 해제하면 뜨지 않는다([설치하기 2](#2-압축-풀기)).
+  - 창이 이미 떴다면 **추가 정보** → **실행**.
+- 서명이 없으므로 받은 파일이 배포한 파일과 같은지는 Releases의 `SHA256SUMS.txt`로 확인(PowerShell: `Get-FileHash 파일이름`).
+- 배포판에 함께 들어 있는 다른 프로젝트의 프로그램은 원래 상태 그대로 포함. 해당 프로그램: Organic Maps 수정판, Qt, Mesa, Visual C++ 런타임, llama.cpp.
 
-- **서명하는 파일**: 이 저장소의 소스에서 GitHub Actions가 빌드한 앱 실행 파일 `korea-sos-atlas-kit.exe` 하나.
-  - 배포판에 함께 들어 있는 다른 프로젝트의 프로그램은 이 프로젝트가 만든 것이 아니므로 서명하지 않고 원래 상태 그대로 포함.
-  - 해당 프로그램: Organic Maps 수정판, Qt, Mesa, Visual C++ 런타임, llama.cpp.
-- **역할**
-  - Committers and reviewers: [finddme](https://github.com/finddme)
-  - Approvers: [finddme](https://github.com/finddme)
-  - 서명 요청은 릴리스마다 승인자가 직접 승인. 저장소와 SignPath 계정은 모두 2단계 인증(MFA) 사용.
+## 개인정보
+
 - **Privacy policy**: This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it.
   - 이 앱은 인터넷을 쓰지 않는다.
   - 함께 들어 있는 지도 프로그램은 키트가 오프라인 모드로 실행해 모든 HTTP 연결을 차단.
